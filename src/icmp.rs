@@ -493,7 +493,16 @@ pub async fn scan_networks(
         0
     };
 
-    println!("STOP EVERY {}, is task {}", stop_every, is_task);
+    if let Some(task) = &config.task {
+        println!(
+            "CONTROL endpoint={}, task_action={:?}, task_every={} /24 (0=off)",
+            endpoint,
+            task.stop_action,
+            stop_every,
+        );
+    } else {
+        println!("CONTROL endpoint={}, task_action=off", endpoint);
+    }
     println!(
         "SCAN {}: {} /24 subnets, state {}",
         scan_name,

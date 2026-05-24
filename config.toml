@@ -8,7 +8,11 @@ ping_type = [
     "TCP"
 ]
 operator = "beeline"
+
+# Контрольный "белый" endpoint. После каждой /24 подсети сканер проверяет,
+# что интернет/маршрут живой. Можно указать IP или hostname.
 endpoint = "77.88.8.8"
+
 results_dir = "results"
 resume_state_dir = "results/state"
 resume = true
@@ -32,13 +36,22 @@ ipinfo_providers = [
 subnets = []
 
 [task]
+# Действие после каждых N обработанных /24 подсетей.
+# 0 = ничего не делать между подсетями.
+# Например, 10 + stop_action = "ChangeIp" сделает GET на change_ip_url после каждых 10 /24.
 stop_every_times = 0
-#stop_action = "Delay"
-#stop_action = "ChangeIp" 
+
+# Что делать, когда сработал stop_every_times:
+# Prompt  - ждать Enter
+# Delay   - поспать delay_seconds
+# ChangeIp - сделать GET на change_ip_url для ротации IP
 stop_action = "Prompt"
+
+# Для stop_action = "ChangeIp"
 change_ip_url = "http://127.0.0.1/changeIp"
+
+# Для stop_action = "Delay"
 delay_seconds = 5
-# task = { stop_every_times = 1, stop_action = "Prompt", change_ip_url = "http://127.0.0.1" }
 
 [[db_update]]
 db_type = "GeoLite2City"
