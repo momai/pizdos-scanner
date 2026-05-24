@@ -2,15 +2,19 @@ name: Release Docker Image
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "v*"
+    paths-ignore:
+      - "README.md"
 
 permissions:
   contents: write
 
 jobs:
   release-docker-image:
-    name: Build and attach Docker image
+    name: Build Docker image
     runs-on: ubuntu-latest
 
     steps:
@@ -21,11 +25,17 @@ jobs:
         run: |
           docker build \
             --pull \
-            --tag pizdos-scanner:${GITHUB_REF_NAME} \
-            --tag pizdos-scanner:latest \
+            --tag pizdos-scanner:ci \
             .
 
+      - name: Tag release image
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          docker tag pizdos-scanner:ci pizdos-scanner:${GITHUB_REF_NAME}
+          docker tag pizdos-scanner:ci pizdos-scanner:latest
+
       - name: Save image artifact
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           mkdir -p dist
           docker save pizdos-scanner:${GITHUB_REF_NAME} pizdos-scanner:latest \
@@ -34,6 +44,7 @@ jobs:
             > dist/pizdos-scanner-docker-image.tar.gz.sha256
 
       - name: Upload GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
