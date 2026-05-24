@@ -1,4 +1,4 @@
-name: Release Docker Image
+name: Docker
 
 on:
   push:
@@ -10,44 +10,48 @@ on:
       - "README.md"
 
 permissions:
-  contents: write
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  release-docker-image:
-    name: Build Docker image
+  build-and-push:
+    name: Build and push to GHCR
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: |
-          docker build \
-            --pull \
-            --tag pizdos-scanner:ci \
-            .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Tag release image
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          docker tag pizdos-scanner:ci pizdos-scanner:${GITHUB_REF_NAME}
-          docker tag pizdos-scanner:ci pizdos-scanner:latest
-
-      - name: Save image artifact
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          mkdir -p dist
-          docker save pizdos-scanner:${GITHUB_REF_NAME} pizdos-scanner:latest \
-            | gzip -9 > dist/pizdos-scanner-docker-image.tar.gz
-          sha256sum dist/pizdos-scanner-docker-image.tar.gz \
-            > dist/pizdos-scanner-docker-image.tar.gz.sha256
-
-      - name: Upload GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          generate_release_notes: true
-          files: |
-            dist/pizdos-scanner-docker-image.tar.gz
-            dist/pizdos-scanner-docker-image.tar.gz.sha256
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

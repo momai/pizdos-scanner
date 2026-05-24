@@ -1,33 +1,29 @@
 # pizdos-scanner
 
-Сканер `/24` подсетей из Xray/V2Ray `geoip.dat`. ICMP используется как дополнительный сигнал, TCP 443 проверяется всегда, остальные TCP-порты берутся из `tcp_ports` в `config.toml`. Результаты пишутся инкрементально в `results/`, поэтому скан можно остановить и продолжить той же командой.
+Сканер `/24` подсетей из Xray/V2Ray `geoip.dat`. ICMP используется как дополнительный сигнал, TCP 443 проверяется всегда, остальные TCP-порты берутся из `tcp_ports` в `config.toml`. Результаты пишутся после каждой подсети, поэтому скан можно остановить и продолжить той же командой.
 
 ## Быстрый старт (Docker)
 
-Скачать `geoip.dat`, собрать образ и запустить скан RU:
+Скачайте репозиторий, подтяните образ из GitHub Container Registry и запустите скан RU:
 
 ```bash
+git clone https://github.com/momai/pizdos-scanner
 cd pizdos-scanner
+
+docker compose pull
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 
-docker compose build
 docker compose run --rm pizdos-scanner geoip-scan ru
 ```
 
-Остановить — `Ctrl+C`. Повторный запуск той же команды продолжит с сохраненного состояния.
+Образ: `ghcr.io/momai/pizdos-scanner:latest`
 
-Чтобы запустить другой список:
-
-```bash
-docker compose run --rm pizdos-scanner geoip-list
-docker compose run --rm pizdos-scanner geoip-scan telegram
-docker compose run --rm pizdos-scanner geoip-scan cn private
-```
+Остановить скан можно через `Ctrl+C`. Повторный запуск той же команды продолжит с сохраненного состояния.
 
 ### MaxMind GeoIP (опционально)
 
-Нужны только для колонок `city`, `asn`, `as_name`. Без них скан работает, поля будут `N/A`. Папка `db/` уже есть в репе:
+MaxMind `.mmdb` нужны только для колонок `city`, `asn`, `as_name`. Без них скан работает, но эти поля будут `N/A`. Папка `db/` уже есть в репе:
 
 ```bash
 curl -L -o db/GeoLite2-City.mmdb \
@@ -37,20 +33,23 @@ curl -L -o db/GeoLite2-ASN.mmdb \
   https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
 ```
 
-## Локальная установка
+## Локальная сборка
 
-Зависимости Ubuntu/Debian:
+Если нужно собрать Docker image из исходников:
+
+```bash
+docker compose build
+docker compose run --rm pizdos-scanner geoip-scan ru
+```
+
+Для запуска бинарника без Docker на Ubuntu/Debian:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential pkg-config libssl-dev curl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-```
 
-Сборка и установка в `~/.local/bin`:
-
-```bash
 ./build.sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -61,7 +60,7 @@ export PATH="$HOME/.local/bin:$PATH"
 INSTALL_DIR=/usr/local/bin sudo ./build.sh
 ```
 
-Для ICMP без `sudo`: разрешить ping для группы и поставить `DGRAM` в `config.toml`:
+Для ICMP без `sudo` на Linux можно включить `DGRAM`:
 
 ```bash
 sudo sysctl -w net.ipv4.ping_group_range="0 1000"
@@ -75,22 +74,60 @@ socket_type = "DGRAM"
 
 ## Полезные команды
 
+Через Docker:
+
+```bash
+docker compose run --rm --no-build pizdos-scanner geoip-list
+docker compose run --rm --no-build pizdos-scanner geoip-scan ru
+docker compose run --rm --no-build pizdos-scanner geoip-scan cn private
+docker compose run --rm --no-build pizdos-scanner geoip-scan telegram
+docker compose run --rm --no-build pizdos-scanner finalize results/<scan>.jsonl
+docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 80 443
+docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 443 --sni example.com
+```
+
+После локальной установки:
+
 ```bash
 pizdos-scanner geoip-list
 pizdos-scanner geoip-scan ru
 pizdos-scanner geoip-scan cn private
 pizdos-scanner geoip-scan telegram
+pizdos-scanner finalize results/<scan>.jsonl
 pizdos-scanner test 1.1.1.1 80 443
 pizdos-scanner test 1.1.1.1 443 --sni example.com
-pizdos-scanner subnet 1.1.1.1
 ```
 
-Аналогичные команды через Docker — `docker compose run --rm pizdos-scanner <команда>`.
-
-Если зависли старые контейнеры:
+Если остались старые контейнеры:
 
 ```bash
 docker compose down --remove-orphans
+```
+
+## Релизы
+
+GitHub Actions собирает и пушит Docker image в [GHCR](https://github.com/momai/pizdos-scanner/pkgs/container/pizdos-scanner) на каждый push, кроме случаев, когда изменился только `README.md`.
+
+Теги образа:
+
+```text
+ghcr.io/momai/pizdos-scanner:latest      # последний push в default branch
+ghcr.io/momai/pizdos-scanner:v0.1.0      # git tag v0.1.0
+ghcr.io/momai/pizdos-scanner:sha-<commit> # конкретный коммит
+```
+
+Обычный push:
+
+```bash
+git push origin master
+```
+
+Версионный релиз:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+docker pull ghcr.io/momai/pizdos-scanner:v0.1.0
 ```
 
 ## Конфиг скана
@@ -109,7 +146,7 @@ resume_state_dir = "results/state"
 resume = true
 ```
 
-`geoip-scan` без аргументов берет коды из `geoip_codes`. Аргументы переопределяют конфиг.
+`geoip-scan` без аргументов берет коды из `geoip_codes`. Аргументы команды переопределяют конфиг.
 
 TCP считается живым, если соединение прошло или порт быстро ответил отказом до общего таймаута 2 секунды. Быстрый отказ отдельно попадает в `tcp_<port>_rejected_hosts` в CSV и `tcp_rejected` в JSONL. Если ответа нет до таймаута — это `false`.
 
@@ -117,10 +154,6 @@ TCP считается живым, если соединение прошло и
 
 ```toml
 tcp_sni_host = "example.com"
-```
-
-```bash
-pizdos-scanner test 1.1.1.1 443 --sni example.com
 ```
 
 Принудительно слать через конкретный интерфейс:
@@ -136,14 +169,20 @@ network_interface = "eth1"
 ```text
 results/*.csv
 results/*.jsonl
+results/*_alive.txt
+results/*_rejected.txt
 results/state/<job_id>.json
 ```
 
 CSV содержит сводку по подсети: `icmp_hosts`, `active_hosts`, колонки по каждому TCP-порту (`tcp_80_hosts`, `tcp_443_hosts`) и быстрые отказы (`tcp_80_rejected_hosts`, `tcp_443_rejected_hosts`).
 
-JSONL содержит расширенную запись с компактным `probe`: диапазоны последних октетов для `icmp`, `tcp_ports`, `tcp_rejected` и `dead`, например `tcp_rejected: {"443": ["6", "8-12"]}`.
+JSONL содержит расширенную запись с компактным `probe`: диапазоны последних октетов для `icmp`, `tcp_ports`, `tcp_rejected` и `dead`.
 
-Если остановить скан и запустить ту же команду снова, сканер пропустит уже обработанные `/24`.
+`*_alive.txt` содержит живые TCP IP без быстрых отказов. `*_rejected.txt` содержит IP, где TCP быстро ответил отказом. Для уже готового JSONL эти файлы можно пересобрать командой:
+
+```bash
+pizdos-scanner finalize results/<scan>.jsonl
+```
 
 ### Endpoint и ротация IP
 
@@ -162,7 +201,7 @@ change_ip_url = "http://127.0.0.1:8080/change-ip"
 delay_seconds = 10
 ```
 
-Плановая ротация после N подсетей (по умолчанию выключена):
+Плановая ротация после N подсетей:
 
 ```toml
 [task]
@@ -170,10 +209,4 @@ stop_every_times = 10
 stop_action = "ChangeIp"
 change_ip_url = "http://192.168.1.1/changeIp"
 delay_seconds = 10
-```
-
-Цикл обработки:
-
-```text
-скан /24 -> запись результата -> проверка endpoint -> плановое действие -> следующая /24
 ```

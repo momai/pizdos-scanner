@@ -2,8 +2,9 @@ name: pizdos-scanner
 
 services:
   pizdos-scanner:
+    image: ghcr.io/momai/pizdos-scanner:latest
     build: .
-    image: pizdos-scanner
+    pull_policy: always
     init: true
     network_mode: host
     stop_signal: SIGINT
