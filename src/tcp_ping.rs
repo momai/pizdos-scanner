@@ -5,8 +5,16 @@ use std::{
 use std::net::Ipv4Addr;
 use rayon::prelude::*;
 use reqwest::blocking::Client;
+use serde::Serialize;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TcpProbeStatus {
+    Open,
+    Rejected,
+    Timeout,
+}
 
 fn clamp_to_timeout_ms(elapsed_ms: f64, timeout: Duration) -> f64 {
     let max_ms = timeout.as_secs_f64() * 1_000.0;
@@ -17,12 +25,28 @@ fn clamp_to_timeout_ms(elapsed_ms: f64, timeout: Duration) -> f64 {
     }
 }
 
-fn probe_once(addr: SocketAddr, to: Duration, network_interface: Option<&str>) -> (bool, f64) {
+impl TcpProbeStatus {
+    pub fn is_alive(self) -> bool {
+        matches!(self, Self::Open | Self::Rejected)
+    }
+}
+
+fn tcp_probe_status(ok: bool, elapsed_ms: f64, timeout: Duration) -> TcpProbeStatus {
+    if ok {
+        TcpProbeStatus::Open
+    } else if elapsed_ms < timeout.as_secs_f64() * 1_000.0 {
+        TcpProbeStatus::Rejected
+    } else {
+        TcpProbeStatus::Timeout
+    }
+}
+
+fn probe_once(addr: SocketAddr, to: Duration, network_interface: Option<&str>) -> (TcpProbeStatus, f64) {
     let start = Instant::now();
     let ok = connect_timeout(addr, to, network_interface).is_ok();
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
     let rtt = clamp_to_timeout_ms(elapsed_ms, to);
-    (ok, rtt)
+    (tcp_probe_status(ok, elapsed_ms, to), rtt)
 }
 
 fn connect_timeout(
@@ -101,12 +125,15 @@ pub fn probe_tcp_with_optional_sni(
     sni_host: Option<&str>,
     network_interface: Option<&str>,
     to: Duration,
-) -> (bool, f64) {
+) -> (TcpProbeStatus, f64) {
     if let Some(sni_host) = sni_host {
         let start = Instant::now();
         let ok = probe_tcp_with_sni(ip, port, sni_host, to, network_interface).unwrap_or(false);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
-        return (ok, clamp_to_timeout_ms(elapsed_ms, to));
+        return (
+            tcp_probe_status(ok, elapsed_ms, to),
+            clamp_to_timeout_ms(elapsed_ms, to),
+        );
     }
 
     let addr = SocketAddr::new(ip, port);
@@ -140,14 +167,14 @@ pub async fn test_tcp_ping(
     ports: &Vec<u16>,
     sni_host: Option<&str>,
     network_interface: Option<&str>,
-) -> anyhow::Result<Vec<(u16, bool, f64)>> {
+) -> anyhow::Result<Vec<(u16, TcpProbeStatus, f64)>> {
     let ip = string_to_ip(address)?;
 
-    let results: Vec<(u16, bool, f64)> = ports.par_iter().map(|port| {
-        let (ok, elapsed_ms) =
+    let results: Vec<(u16, TcpProbeStatus, f64)> = ports.par_iter().map(|port| {
+        let (status, elapsed_ms) =
             probe_tcp_with_optional_sni(ip, *port, sni_host, network_interface, Duration::from_secs(2));
-        println!("{}:{} {} {:.4}", address, port, ok, elapsed_ms);
-        (*port, ok, elapsed_ms)
+        println!("{}:{} {:?} alive={} {:.4}", address, port, status, status.is_alive(), elapsed_ms);
+        (*port, status, elapsed_ms)
     }).collect();
 
     Ok(results)

@@ -19,7 +19,7 @@ use crate::ipinfo::get_providers_info;
 use crate::init::{Config, ConfigSocketType};
 use crate::icmp::{app, ping_subnet_matrix_rayon, scan_networks, SubnetScanFile};
 use crate::geoip::download_dbs;
-use crate::utils::get_current_ip;
+use crate::utils::{get_current_ip, write_final_ip_lists_from_jsonl};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -84,6 +84,12 @@ enum Command {
         /// Override geoip codes from config
         #[arg(value_name = "codes")]
         codes: Vec<String>,
+    },
+    /// Build final alive/rejected TXT lists from scanner JSONL
+    Finalize {
+        /// Scanner JSONL result file
+        #[arg(value_name = "jsonl_file")]
+        jsonl_file: String,
     },
 }
 
@@ -261,6 +267,12 @@ async fn main() -> Result<()> {
             let networks = loaded.networks.iter().map(ToString::to_string).collect();
             let scan_name = format!("geoip_{}", loaded.matched_codes.join("_").to_lowercase());
             scan_networks(&config, &scan_name, networks).await?;
+        },
+        Some(Command::Finalize { jsonl_file }) => {
+            let (alive_file, rejected_file, alive_count, rejected_count) =
+                write_final_ip_lists_from_jsonl(&jsonl_file)?;
+            println!("Alive IPs: {} -> {}", alive_count, alive_file);
+            println!("Rejected IPs: {} -> {}", rejected_count, rejected_file);
         },
         None => {
 

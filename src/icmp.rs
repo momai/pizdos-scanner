@@ -18,12 +18,14 @@ use crate::geoip::{GeoIpService, SubnetInfo};
 use crate::utils::{
     append_result_to_csv,
     append_result_to_jsonl,
+    append_result_to_txt_lists,
     HostProbeRecord,
     save_results_to_file,
     save_results_to_json,
     tcp_port_summary,
     SubnetProbeStats,
 };
+use crate::tcp_ping::TcpProbeStatus;
 use crate::init::{ConfigEndpointFailureAction, ConfigStopAction};
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +33,7 @@ use serde::{Deserialize, Serialize};
 pub struct HostProbeResult {
     pub icmp: bool,
     pub tcp_ports: Vec<u16>,
+    pub tcp_rejected_ports: Vec<u16>,
 }
 
 impl HostProbeResult {
@@ -249,16 +252,19 @@ fn probe_host(
         let ports = tcp_ports_with_443(tcp_ports);
         for _ in 0..attempts {
             for port in &ports {
-                let (ok, _) = crate::tcp_ping::probe_tcp_with_optional_sni(
+                let (status, _) = crate::tcp_ping::probe_tcp_with_optional_sni(
                     ip,
                     *port,
                     tcp_sni_host,
                     network_interface,
                     Duration::from_secs(2),
                 );
-                if ok {
+                if status.is_alive() {
                     if !result.tcp_ports.contains(port) {
                         result.tcp_ports.push(*port);
+                    }
+                    if status == TcpProbeStatus::Rejected && !result.tcp_rejected_ports.contains(port) {
+                        result.tcp_rejected_ports.push(*port);
                     }
                 }
             }
@@ -360,18 +366,24 @@ async fn process_subnet(
                 octet,
                 icmp: probe.icmp,
                 tcp_ports: probe.tcp_ports.clone(),
+                tcp_rejected_ports: probe.tcp_rejected_ports.clone(),
                 tcp_alive: probe.tcp_alive(),
             }
         })
         .collect();
 
     let mut tcp_port_alive = BTreeMap::new();
+    let mut tcp_port_rejected = BTreeMap::new();
     for port in tcp_ports_with_443(tcp_ports) {
         tcp_port_alive.insert(port, 0);
+        tcp_port_rejected.insert(port, 0);
     }
     for host in &host_results {
         for port in &host.tcp_ports {
             *tcp_port_alive.entry(*port).or_insert(0) += 1;
+        }
+        for port in &host.tcp_rejected_ports {
+            *tcp_port_rejected.entry(*port).or_insert(0) += 1;
         }
     }
 
@@ -379,6 +391,7 @@ async fn process_subnet(
         icmp_alive: host_results.iter().filter(|host| host.icmp).count(),
         tcp_alive: host_results.iter().filter(|host| host.tcp_alive).count(),
         tcp_port_alive,
+        tcp_port_rejected,
         hosts: host_results,
     };
 
@@ -429,6 +442,10 @@ struct ScanState {
     scan_name: String,
     result_csv: String,
     result_jsonl: String,
+    #[serde(default)]
+    result_alive_txt: String,
+    #[serde(default)]
+    result_rejected_txt: String,
     completed_subnets: Vec<String>,
     failed_subnets: Vec<String>,
     subnet24_count: u32,
@@ -459,7 +476,7 @@ fn update_hash(hash: &mut u64, value: &str) {
 
 fn build_job_id(config: &Config, scan_name: &str, networks: &[String]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
-    update_hash(&mut hash, "result_schema_tcp_port_columns_v1");
+    update_hash(&mut hash, "result_schema_tcp_txt_lists_v1");
     update_hash(&mut hash, scan_name);
     update_hash(&mut hash, &format!("{:?}", config.ping_type));
     update_hash(&mut hash, &format!("{:?}", config.tcp_ports()));
@@ -500,6 +517,8 @@ fn create_state(config: &Config, scan_name: &str, job_id: String) -> ScanState {
     let filename = format!("{scan_name}{}{date_string}", operator_part(config));
     let result_csv = result_path.join(format!("{filename}.csv")).to_string_lossy().to_string();
     let result_jsonl = result_path.join(format!("{filename}.jsonl")).to_string_lossy().to_string();
+    let result_alive_txt = result_path.join(format!("{filename}_alive.txt")).to_string_lossy().to_string();
+    let result_rejected_txt = result_path.join(format!("{filename}_rejected.txt")).to_string_lossy().to_string();
     let now = chrono::Local::now().to_rfc3339();
 
     ScanState {
@@ -508,6 +527,8 @@ fn create_state(config: &Config, scan_name: &str, job_id: String) -> ScanState {
         scan_name: scan_name.to_string(),
         result_csv,
         result_jsonl,
+        result_alive_txt,
+        result_rejected_txt,
         completed_subnets: Vec::new(),
         failed_subnets: Vec::new(),
         subnet24_count: 1,
@@ -663,6 +684,7 @@ pub async fn scan_networks(
 
                 append_result_to_csv(&result, &state.result_csv)?;
                 append_result_to_jsonl(&result, &state.result_jsonl)?;
+                append_result_to_txt_lists(&result, &state.result_alive_txt, &state.result_rejected_txt)?;
                 processed_networks.push(result);
                 completed_subnets.insert(subnet_string.clone());
                 failed_subnets.remove(&subnet_string);
@@ -766,6 +788,8 @@ pub async fn scan_networks(
     save_state(&state_path, &mut state)?;
     println!("CSV journal saved: {}", state.result_csv);
     println!("JSONL journal saved: {}", state.result_jsonl);
+    println!("Alive IPs saved: {}", state.result_alive_txt);
+    println!("Rejected IPs saved: {}", state.result_rejected_txt);
 
     if config.logger_filetype.len() > 0 {
         let result_path = PathBuf::from(config.results_dir());
