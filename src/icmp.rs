@@ -3,7 +3,7 @@ use ipnetwork::Ipv4Network;
 use ping::Ping;
 use rayon::prelude::*;
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::{self, File},
     io::Read,
     net::{IpAddr, Ipv4Addr, ToSocketAddrs},
@@ -18,23 +18,24 @@ use crate::geoip::{GeoIpService, SubnetInfo};
 use crate::utils::{
     append_result_to_csv,
     append_result_to_jsonl,
+    HostProbeRecord,
     save_results_to_file,
     save_results_to_json,
+    tcp_port_summary,
     SubnetProbeStats,
 };
 use crate::init::{ConfigEndpointFailureAction, ConfigStopAction};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct HostProbeResult {
     pub icmp: bool,
-    pub tcp443: bool,
-    pub tcp_any: bool,
+    pub tcp_ports: Vec<u16>,
 }
 
 impl HostProbeResult {
     pub fn tcp_alive(&self) -> bool {
-        self.tcp443 || self.tcp_any
+        !self.tcp_ports.is_empty()
     }
 }
 
@@ -129,15 +130,25 @@ pub async fn ping_subnet_matrix_rayon(
     }
 
     let icmp_count = results.iter().filter(|(_, probe)| probe.icmp).count();
-    let tcp443_count = results.iter().filter(|(_, probe)| probe.tcp443).count();
     let tcp_count = results.iter().filter(|(_, probe)| probe.tcp_alive()).count();
+    let mut tcp_port_counts: BTreeMap<u16, usize> = BTreeMap::new();
+    for (_, probe) in &results {
+        for port in &probe.tcp_ports {
+            *tcp_port_counts.entry(*port).or_insert(0) += 1;
+        }
+    }
+    let tcp_port_info = tcp_port_counts
+        .iter()
+        .map(|(port, count)| format!("{port}:{count}"))
+        .collect::<Vec<_>>()
+        .join(",");
     println!(
-        "{}{} ICMP: {} | TCP 443: {} | TCP any: {} / {}",
+        "{}{} ICMP: {} | TCP: {} | ports: {} / {}",
         " ".repeat(20),
         "stats".cyan(),
         icmp_count.to_string().yellow(),
-        tcp443_count.to_string().green(),
         tcp_count.to_string().bright_green(),
+        tcp_port_info.green(),
         results.len(),
     );
     println!("{} green=tcp  yellow=icmp-only  *=dead", " ".repeat(20));
@@ -246,10 +257,8 @@ fn probe_host(
                     Duration::from_secs(2),
                 );
                 if ok {
-                    if *port == 443 {
-                        result.tcp443 = true;
-                    } else {
-                        result.tcp_any = true;
+                    if !result.tcp_ports.contains(port) {
+                        result.tcp_ports.push(*port);
                     }
                 }
             }
@@ -339,25 +348,39 @@ async fn process_subnet(
         .collect();
 
     // Параллельно проверяем все хосты в подсети
-    let stats = hosts
+    let host_results: Vec<HostProbeRecord> = hosts
         .par_iter()
         .map(|&ip| {
             let probe = probe_host(ip, 2, socket_type, ping_type, tcp_ports, tcp_sni_host, network_interface);
-            SubnetProbeStats {
-                icmp_alive: usize::from(probe.icmp),
-                tcp443_alive: usize::from(probe.tcp443),
-                tcp_alive: usize::from(probe.tcp_alive()),
+            let octet = match ip {
+                IpAddr::V4(ip) => ip.octets()[3],
+                IpAddr::V6(_) => 0,
+            };
+            HostProbeRecord {
+                octet,
+                icmp: probe.icmp,
+                tcp_ports: probe.tcp_ports.clone(),
+                tcp_alive: probe.tcp_alive(),
             }
         })
-        .reduce(
-            || SubnetProbeStats::default(),
-            |mut acc, item| {
-                acc.icmp_alive += item.icmp_alive;
-                acc.tcp443_alive += item.tcp443_alive;
-                acc.tcp_alive += item.tcp_alive;
-                acc
-            },
-        );
+        .collect();
+
+    let mut tcp_port_alive = BTreeMap::new();
+    for port in tcp_ports_with_443(tcp_ports) {
+        tcp_port_alive.insert(port, 0);
+    }
+    for host in &host_results {
+        for port in &host.tcp_ports {
+            *tcp_port_alive.entry(*port).or_insert(0) += 1;
+        }
+    }
+
+    let stats = SubnetProbeStats {
+        icmp_alive: host_results.iter().filter(|host| host.icmp).count(),
+        tcp_alive: host_results.iter().filter(|host| host.tcp_alive).count(),
+        tcp_port_alive,
+        hosts: host_results,
+    };
 
     Ok((subnet, geoip_info, stats))
 }
@@ -436,6 +459,7 @@ fn update_hash(hash: &mut u64, value: &str) {
 
 fn build_job_id(config: &Config, scan_name: &str, networks: &[String]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
+    update_hash(&mut hash, "result_schema_tcp_port_columns_v1");
     update_hash(&mut hash, scan_name);
     update_hash(&mut hash, &format!("{:?}", config.ping_type));
     update_hash(&mut hash, &format!("{:?}", config.tcp_ports()));
@@ -623,10 +647,10 @@ pub async fn scan_networks(
                 let iteration_time = iteration_start.elapsed();
                 let info_string = if result.2.tcp_alive > 0 || result.2.icmp_alive > 0 {
                     format!(
-                        "icmp:{} tcp443:{} tcp:{}",
+                        "icmp:{} tcp:{} ports:{}",
                         result.2.icmp_alive,
-                        result.2.tcp443_alive,
                         result.2.tcp_alive,
+                        tcp_port_summary(&result.2),
                     )
                 } else {
                     "-".to_string()
@@ -720,15 +744,15 @@ pub async fn scan_networks(
     }
 
     println!("{}", "=".repeat(100));
-    println!("{:<16} | {:<5} | {:<5} | {:<5} | {:<12} | {:<3} | {:<15} | {:<10} | {:<30}",
-             "subnet", "icmp", "t443", "tcp", "source", "", "geo", "ASN", "ISP");
+    println!("{:<16} | {:<5} | {:<5} | {:<16} | {:<12} | {:<3} | {:<15} | {:<10} | {:<30}",
+             "subnet", "icmp", "tcp", "ports", "source", "", "geo", "ASN", "ISP");
     println!("{}", "-".repeat(100));
     for (subnet, info, stats) in processed_networks.clone() {
-        println!("{:<16} | {:<5} | {:<5} | {:<5} | {:<12} | {:<3} | {:<15} | AS{:<8} | {:<30}",
+        println!("{:<16} | {:<5} | {:<5} | {:<16} | {:<12} | {:<3} | {:<15} | AS{:<8} | {:<30}",
                  subnet.to_string(),
                  stats.icmp_alive.to_string(),
-                 stats.tcp443_alive.to_string(),
                  stats.tcp_alive.to_string(),
+                 tcp_port_summary(&stats),
                  info.source,
                  info.country,
                  info.city,
