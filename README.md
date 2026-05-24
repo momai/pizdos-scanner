@@ -104,32 +104,6 @@ pizdos-scanner test 1.1.1.1 443 --sni example.com
 docker compose down --remove-orphans
 ```
 
-## Релизы
-
-GitHub Actions собирает и пушит Docker image в [GHCR](https://github.com/momai/pizdos-scanner/pkgs/container/pizdos-scanner) на каждый push, кроме случаев, когда изменился только `README.md`.
-
-Теги образа:
-
-```text
-ghcr.io/momai/pizdos-scanner:latest      # последний push в default branch
-ghcr.io/momai/pizdos-scanner:v0.1.0      # git tag v0.1.0
-ghcr.io/momai/pizdos-scanner:sha-<commit> # конкретный коммит
-```
-
-Обычный push:
-
-```bash
-git push origin master
-```
-
-Версионный релиз:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-docker pull ghcr.io/momai/pizdos-scanner:v0.1.0
-```
-
 ## Конфиг скана
 
 Основные параметры в `config.toml`:

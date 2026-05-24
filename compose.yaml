@@ -2,7 +2,7 @@ name: pizdos-scanner
 
 services:
   pizdos-scanner:
-    image: ghcr.io/momai/pizdos-scanner:latest
+    image: ${PIZDOS_SCANNER_IMAGE:-ghcr.io/momai/pizdos-scanner:latest}
     build: .
     pull_policy: always
     init: true

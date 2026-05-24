@@ -10,7 +10,7 @@ on:
       - "README.md"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -55,3 +55,26 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Быстрый запуск
+
+            ```bash
+            git clone https://github.com/momai/pizdos-scanner
+            cd pizdos-scanner
+
+            docker pull ghcr.io/momai/pizdos-scanner:${{ github.ref_name }}
+            export PIZDOS_SCANNER_IMAGE=ghcr.io/momai/pizdos-scanner:${{ github.ref_name }}
+            curl -L -o geoip.dat \
+              https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+
+            docker compose pull
+            docker compose run --rm pizdos-scanner geoip-scan ru
+            ```
+
+            Docker image: `ghcr.io/momai/pizdos-scanner:${{ github.ref_name }}`
