@@ -107,20 +107,27 @@ sudo sysctl -w net.ipv4.ping_group_range="0 1000"
 socket_type = "DGRAM"
 ```
 
-Сборка и запуск:
+Сборка и установка в `~/.local/bin`:
 
 ```bash
-cargo build --release
-cargo run -- geoip-list
-cargo run -- geoip-scan ru
+./build.sh
+export PATH="$HOME/.local/bin:$PATH"
+pizdos-scanner geoip-list
+pizdos-scanner geoip-scan ru
+```
+
+Системная установка:
+
+```bash
+INSTALL_DIR=/usr/local/bin sudo ./build.sh
 ```
 
 Другие команды:
 
 ```bash
-cargo run -- test 1.1.1.1 80 443
-cargo run -- subnet 1.1.1.1
-cargo run -- subnets
+pizdos-scanner test 1.1.1.1 80 443
+pizdos-scanner subnet 1.1.1.1
+pizdos-scanner subnets
 ```
 
 ## Resume и результаты
@@ -198,7 +205,15 @@ network_interface = "eth1"
 
 ## Что сканировать
 
-Через CLI:
+Через Docker:
+
+```bash
+docker compose run --rm pizdos-scanner geoip-scan ru
+docker compose run --rm pizdos-scanner geoip-scan cn private
+docker compose run --rm pizdos-scanner geoip-scan telegram
+```
+
+После `./build.sh`:
 
 ```bash
 pizdos-scanner geoip-scan ru
