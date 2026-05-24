@@ -4,17 +4,18 @@
 
 ## Быстрый старт (Docker)
 
-Скачать `geoip.dat` и запустить скан RU:
+Скачать `geoip.dat`, собрать образ и запустить скан RU:
 
 ```bash
 cd pizdos-scanner
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 
-docker compose up --build
+docker compose build
+docker compose run --rm pizdos-scanner geoip-scan ru
 ```
 
-Остановить — `Ctrl+C`. Повторный запуск продолжит с сохраненного состояния.
+Остановить — `Ctrl+C`. Повторный запуск той же команды продолжит с сохраненного состояния.
 
 Чтобы запустить другой список:
 
