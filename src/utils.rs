@@ -10,6 +10,13 @@ use serde::{Deserialize, Serialize};
 use anyhow::Context;
 use crate::geoip::SubnetInfo;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SubnetProbeStats {
+    pub icmp_alive: usize,
+    pub tcp443_alive: usize,
+    pub tcp_alive: usize,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SubnetRecord {
     subnet: String,
@@ -18,12 +25,14 @@ pub struct SubnetRecord {
     city: String,
     asn: u32,
     as_name: String,
+    icmp_hosts: usize,
+    tcp443_hosts: usize,
     active_hosts: usize,
 }
 
 impl SubnetRecord {
-    pub fn from_result(result: &(Ipv4Network, SubnetInfo, usize)) -> Self {
-        let (subnet, info, count) = result;
+    pub fn from_result(result: &(Ipv4Network, SubnetInfo, SubnetProbeStats)) -> Self {
+        let (subnet, info, stats) = result;
         Self {
             subnet: subnet.to_string(),
             source: info.source.clone(),
@@ -31,13 +40,15 @@ impl SubnetRecord {
             city: info.city.clone(),
             asn: info.asn,
             as_name: info.as_name.clone(),
-            active_hosts: *count,
+            icmp_hosts: stats.icmp_alive,
+            tcp443_hosts: stats.tcp443_alive,
+            active_hosts: stats.tcp_alive,
         }
     }
 }
 
 pub fn save_results_to_file(
-    results: &[(Ipv4Network, SubnetInfo, usize)],
+    results: &[(Ipv4Network, SubnetInfo, SubnetProbeStats)],
     filename: &str,
 ) -> anyhow::Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = Path::new(filename).parent() {
@@ -49,21 +60,23 @@ pub fn save_results_to_file(
 
     writeln!(
         writer,
-        "subnet;source;country;city;asn;as_name;active_hosts"
+        "subnet;source;country;city;asn;as_name;icmp_hosts;tcp443_hosts;active_hosts"
     )?;
 
     // Записываем данные
-    for (subnet, info, count) in results {
+    for (subnet, info, stats) in results {
         writeln!(
             writer,
-            "{};{};{};{};{};{};{}",
+            "{};{};{};{};{};{};{};{};{}",
             subnet,
             info.source,
             info.country,
             info.city,
             info.asn,
             info.as_name,
-            count
+            stats.icmp_alive,
+            stats.tcp443_alive,
+            stats.tcp_alive
         )?;
     }
 
@@ -74,7 +87,7 @@ pub fn save_results_to_file(
 }
 
 pub fn save_results_to_json(
-    results: &[(Ipv4Network, SubnetInfo, usize)],
+    results: &[(Ipv4Network, SubnetInfo, SubnetProbeStats)],
     filename: &str,
 ) -> anyhow::Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = Path::new(filename).parent() {
@@ -83,15 +96,7 @@ pub fn save_results_to_json(
 
     let records: Vec<SubnetRecord> = results
         .iter()
-        .map(|(subnet, info, count)| SubnetRecord {
-            subnet: subnet.to_string(),
-            source: info.source.clone(),
-            country: info.country.clone(),
-            city: info.city.clone(),
-            asn: info.asn,
-            as_name: info.as_name.clone(),
-            active_hosts: *count,
-        })
+        .map(SubnetRecord::from_result)
         .collect();
 
     let json = serde_json::to_string_pretty(&records)?;
@@ -102,7 +107,7 @@ pub fn save_results_to_json(
 }
 
 pub fn append_result_to_csv(
-    result: &(Ipv4Network, SubnetInfo, usize),
+    result: &(Ipv4Network, SubnetInfo, SubnetProbeStats),
     filename: &str,
 ) -> anyhow::Result<()> {
     if let Some(parent) = Path::new(filename).parent() {
@@ -116,19 +121,21 @@ pub fn append_result_to_csv(
     let mut writer = BufWriter::new(file);
 
     if should_write_header {
-        writeln!(writer, "subnet;source;country;city;asn;as_name;active_hosts")?;
+        writeln!(writer, "subnet;source;country;city;asn;as_name;icmp_hosts;tcp443_hosts;active_hosts")?;
     }
 
     let record = SubnetRecord::from_result(result);
     writeln!(
         writer,
-        "{};{};{};{};{};{};{}",
+        "{};{};{};{};{};{};{};{};{}",
         record.subnet,
         record.source,
         record.country,
         record.city,
         record.asn,
         record.as_name,
+        record.icmp_hosts,
+        record.tcp443_hosts,
         record.active_hosts
     )?;
     writer.flush()?;
@@ -137,7 +144,7 @@ pub fn append_result_to_csv(
 }
 
 pub fn append_result_to_jsonl(
-    result: &(Ipv4Network, SubnetInfo, usize),
+    result: &(Ipv4Network, SubnetInfo, SubnetProbeStats),
     filename: &str,
 ) -> anyhow::Result<()> {
     if let Some(parent) = Path::new(filename).parent() {

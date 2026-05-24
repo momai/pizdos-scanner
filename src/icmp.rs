@@ -20,9 +20,33 @@ use crate::utils::{
     append_result_to_jsonl,
     save_results_to_file,
     save_results_to_json,
+    SubnetProbeStats,
 };
 use crate::init::{ConfigEndpointFailureAction, ConfigStopAction};
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HostProbeResult {
+    pub icmp: bool,
+    pub tcp443: bool,
+    pub tcp_any: bool,
+}
+
+impl HostProbeResult {
+    pub fn tcp_alive(&self) -> bool {
+        self.tcp443 || self.tcp_any
+    }
+}
+
+fn tcp_ports_with_443(tcp_ports: &[u16]) -> Vec<u16> {
+    let mut ports: Vec<u16> = tcp_ports.to_vec();
+    if !ports.contains(&443) {
+        ports.push(443);
+    }
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
 
 fn log_time() -> String {
     format!("[{}]", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
@@ -43,7 +67,7 @@ pub async fn ping_subnet_matrix_rayon(
         anyhow::bail!("Wrong IP format");
     }
 
-    if !ping_host("127.0.0.1".parse()?, 1, &socket_type, &vec![ConfigPingType::ICMP], &[], None, None) {
+    if !probe_host("127.0.0.1".parse()?, 1, &socket_type, &vec![ConfigPingType::ICMP], &[], None, None).icmp {
         anyhow::bail!("PING («{:?}» socket type) not available", &socket_type);
     }
 
@@ -54,33 +78,42 @@ pub async fn ping_subnet_matrix_rayon(
     println!("\n{} {:?} SUBNET {}.{}.{}.0/24:", " ".repeat(20), ping_type, a, b, c);
     println!("{}", "─".repeat(59).cyan());
 
-    // Using rayon for parallel ping
-    let results: Vec<(u8, bool)> = (1..=255u8)
+    // Using rayon for parallel probe
+    let results: Vec<(u8, HostProbeResult)> = (1..=255u8)
         .into_par_iter()
         .map(|i| {
             let ip = IpAddr::V4(Ipv4Addr::new(a, b, c, i));
-            let alive = ping_host(ip, attempts, &socket_type, &ping_type, tcp_ports, tcp_sni_host, network_interface);
-            (i, alive)
+            let probe = probe_host(ip, attempts, &socket_type, &ping_type, tcp_ports, tcp_sni_host, network_interface);
+            (i, probe)
         })
         .collect();
 
     let mut first_alive_octet: u8 = 1;
-    for (octet, alive) in results.clone() {
-        if alive && octet != 1 {
+    for (octet, probe) in results.clone() {
+        if probe.tcp_alive() && octet != 1 {
             first_alive_octet = octet;
             break;
         }
-    };
+    }
+    if first_alive_octet == 1 {
+        for (octet, probe) in results.clone() {
+            if probe.icmp && octet != 1 {
+                first_alive_octet = octet;
+                break;
+            }
+        }
+    }
     let first_ip = IpAddr::V4(Ipv4Addr::new(a, b, c, first_alive_octet));
     let hostname = dns_lookup::lookup_addr(&first_ip).unwrap_or_else(|_| "None".to_string());
 
     let columns = 15;
     let mut count = 0;
 
-    for (octet, alive) in results.clone() {
-        if alive {
-            // print!("{:>3}", "★".green().bold());
+    for (octet, probe) in results.clone() {
+        if probe.tcp_alive() {
             print!("{:<4}", format!("{}", octet).bright_green().bold());
+        } else if probe.icmp {
+            print!("{:<4}", format!("{}", octet).yellow().bold());
         } else {
             print!("{:<4}", format!("*").dimmed());
         }
@@ -95,13 +128,19 @@ pub async fn ping_subnet_matrix_rayon(
         println!();
     }
 
-    let alive_count = results.iter().filter(|&(_, alive)| *alive).count();
-    println!("{}{} of {} available ({:.1}%)",
-             " ".repeat(30),
-             alive_count.to_string().green(),
-             results.len(),
-             (alive_count as f32 / results.len() as f32) * 100.0
+    let icmp_count = results.iter().filter(|(_, probe)| probe.icmp).count();
+    let tcp443_count = results.iter().filter(|(_, probe)| probe.tcp443).count();
+    let tcp_count = results.iter().filter(|(_, probe)| probe.tcp_alive()).count();
+    println!(
+        "{}{} ICMP: {} | TCP 443: {} | TCP any: {} / {}",
+        " ".repeat(20),
+        "stats".cyan(),
+        icmp_count.to_string().yellow(),
+        tcp443_count.to_string().green(),
+        tcp_count.to_string().bright_green(),
+        results.len(),
     );
+    println!("{} green=tcp  yellow=icmp-only  *=dead", " ".repeat(20));
     println!("{}", "─".repeat(59).cyan());
 
     println!("PTR for {} - {}", first_ip, hostname);
@@ -160,7 +199,7 @@ fn split_ipv4_to_24(net: Ipv4Network) -> anyhow::Result<Vec<Ipv4Network>> {
     Ok(subnets)
 }
 
-fn ping_host(
+fn probe_host(
     ip: IpAddr,
     attempts: u8,
     socket_type: &ConfigSocketType,
@@ -168,19 +207,16 @@ fn ping_host(
     tcp_ports: &[u16],
     tcp_sni_host: Option<&str>,
     network_interface: Option<&str>,
-) -> bool {
-
+) -> HostProbeResult {
     let socket = match socket_type {
         ConfigSocketType::DGRAM => ping::DGRAM,
         ConfigSocketType::RAW => ping::RAW,
     };
 
-    // ping_type.contains(&ConfigPingType::ICMP)
+    let mut result = HostProbeResult::default();
 
-    let mut res = false;
-
-    for _ in 0..attempts {
-        if ping_type.contains(&ConfigPingType::ICMP) {
+    if ping_type.contains(&ConfigPingType::ICMP) {
+        for _ in 0..attempts {
             let mut ping = Ping::new(ip);
             ping.timeout(Duration::from_secs(1)).socket_type(socket);
             #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -189,13 +225,19 @@ fn ping_host(
             }
 
             match ping.send() {
-                Ok(_) => res = true,
+                Ok(_) => {
+                    result.icmp = true;
+                    break;
+                }
                 Err(_) => std::thread::sleep(Duration::from_millis(200)),
             }
         }
+    }
 
-        if ping_type.contains(&ConfigPingType::TCP) && res == false {
-            for port in tcp_ports {
+    if ping_type.contains(&ConfigPingType::TCP) {
+        let ports = tcp_ports_with_443(tcp_ports);
+        for _ in 0..attempts {
+            for port in &ports {
                 let (ok, _) = crate::tcp_ping::probe_tcp_with_optional_sni(
                     ip,
                     *port,
@@ -204,18 +246,38 @@ fn ping_host(
                     Duration::from_secs(2),
                 );
                 if ok {
-                    res = true;
-                    break;
+                    if *port == 443 {
+                        result.tcp443 = true;
+                    } else {
+                        result.tcp_any = true;
+                    }
                 }
             }
+            if result.tcp_alive() {
+                break;
+            }
         }
-
     }
 
-    // std::thread::sleep(Duration::from_millis(500));
+    result
+}
 
-    // false
-    res
+fn ping_host_icmp_only(
+    ip: IpAddr,
+    attempts: u8,
+    socket_type: &ConfigSocketType,
+    network_interface: Option<&str>,
+) -> bool {
+    probe_host(
+        ip,
+        attempts,
+        socket_type,
+        &vec![ConfigPingType::ICMP],
+        &[],
+        None,
+        network_interface,
+    )
+    .icmp
 }
 
 fn ping_endpoint(
@@ -244,7 +306,7 @@ fn ping_endpoint(
         endpoint.parse().unwrap()
     };
 
-    ping_host(ip, attempts, socket_type, &vec![ConfigPingType::ICMP], &[], None, network_interface)
+    ping_host_icmp_only(ip, attempts, socket_type, network_interface)
 }
 
 async fn process_subnet(
@@ -257,7 +319,7 @@ async fn process_subnet(
     tcp_ports: &[u16],
     tcp_sni_host: Option<&str>,
     network_interface: Option<&str>,
-) -> anyhow::Result<(Ipv4Network, SubnetInfo, usize)> {
+) -> anyhow::Result<(Ipv4Network, SubnetInfo, SubnetProbeStats)> {
     // Получаем GeoIP информацию для первого IP подсети
     let first_ip = subnet.network();
     let mut geoip_info = match geoip {
@@ -276,23 +338,28 @@ async fn process_subnet(
         .map(|addr| addr.to_string().parse().unwrap())
         .collect();
 
-    // Параллельно пингуем все хосты в подсети
-    let successful_hosts: usize = hosts
+    // Параллельно проверяем все хосты в подсети
+    let stats = hosts
         .par_iter()
         .map(|&ip| {
-            if ping_host(ip, 2, socket_type, ping_type, tcp_ports, tcp_sni_host, network_interface) {
-                1
-            } else {
-                0
+            let probe = probe_host(ip, 2, socket_type, ping_type, tcp_ports, tcp_sni_host, network_interface);
+            SubnetProbeStats {
+                icmp_alive: usize::from(probe.icmp),
+                tcp443_alive: usize::from(probe.tcp443),
+                tcp_alive: usize::from(probe.tcp_alive()),
             }
         })
-        .sum();
+        .reduce(
+            || SubnetProbeStats::default(),
+            |mut acc, item| {
+                acc.icmp_alive += item.icmp_alive;
+                acc.tcp443_alive += item.tcp443_alive;
+                acc.tcp_alive += item.tcp_alive;
+                acc
+            },
+        );
 
-    // if ping_type.contains(&ConfigPingType::TCP) {
-    //     sleep(Duration::from_millis(5000)).await
-    // }
-
-    Ok((subnet, geoip_info, successful_hosts))
+    Ok((subnet, geoip_info, stats))
 }
 
 fn wait_for_any_key() -> std::io::Result<()> {
@@ -479,11 +546,11 @@ pub async fn scan_networks(
         }
     };
 
-    if !ping_host("127.0.0.1".parse()?, 1, &config.socket_type.as_ref().unwrap(), &vec![ConfigPingType::ICMP], &[], None, None) {
+    if !probe_host("127.0.0.1".parse()?, 1, &config.socket_type.as_ref().unwrap(), &vec![ConfigPingType::ICMP], &[], None, None).icmp {
         anyhow::bail!("PING («{:?}» socket type) not available", &config.socket_type.as_ref().unwrap())
     }
 
-    let mut processed_networks: Vec<(Ipv4Network, SubnetInfo, usize)> = Vec::new();
+    let mut processed_networks: Vec<(Ipv4Network, SubnetInfo, SubnetProbeStats)> = Vec::new();
     let endpoint = config.endpoint.clone();
     let tcp_ports = config.tcp_ports();
     let tcp_sni_host = config.tcp_sni_host.as_deref();
@@ -554,10 +621,19 @@ pub async fn scan_networks(
         ).await {
             Ok(result) => {
                 let iteration_time = iteration_start.elapsed();
-                let info_string = if result.2 > 0 { format!("+ {}", result.2) } else { "-".to_string() };
+                let info_string = if result.2.tcp_alive > 0 || result.2.icmp_alive > 0 {
+                    format!(
+                        "icmp:{} tcp443:{} tcp:{}",
+                        result.2.icmp_alive,
+                        result.2.tcp443_alive,
+                        result.2.tcp_alive,
+                    )
+                } else {
+                    "-".to_string()
+                };
 
                 println!(
-                    "{:<26} {:<7} {:<18} {:<5}   [{}ms]",
+                    "{:<26} {:<7} {:<18} {:<24}   [{}ms]",
                     log_time(), string_part, subnet_string, info_string, iteration_time.as_millis()
                 );
 
@@ -644,13 +720,15 @@ pub async fn scan_networks(
     }
 
     println!("{}", "=".repeat(100));
-    println!("{:<16} | {:<5} | {:<12} | {:<3} | {:<15} | {:<10} | {:<30}",
-             "subnet", "cnt", "source", "", "geo", "ASN", "ISP");
+    println!("{:<16} | {:<5} | {:<5} | {:<5} | {:<12} | {:<3} | {:<15} | {:<10} | {:<30}",
+             "subnet", "icmp", "t443", "tcp", "source", "", "geo", "ASN", "ISP");
     println!("{}", "-".repeat(100));
-    for (subnet, info, count) in processed_networks.clone() {
-        println!("{:<16} | {:<5} | {:<12} | {:<3} | {:<15} | AS{:<8} | {:<30}",
+    for (subnet, info, stats) in processed_networks.clone() {
+        println!("{:<16} | {:<5} | {:<5} | {:<5} | {:<12} | {:<3} | {:<15} | AS{:<8} | {:<30}",
                  subnet.to_string(),
-                 count.to_string(),
+                 stats.icmp_alive.to_string(),
+                 stats.tcp443_alive.to_string(),
+                 stats.tcp_alive.to_string(),
                  info.source,
                  info.country,
                  info.city,

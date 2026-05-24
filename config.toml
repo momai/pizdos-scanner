@@ -2,10 +2,11 @@
 geoip_dat_path = "geoip.dat"
 geoip_codes = ["ru"]
 
-# Как проверять хосты. Сначала ICMP, если не ответил - TCP по tcp_ports.
+# Как проверять хосты. ICMP — только информативно. TCP 443 проверяется всегда,
+# даже если ICMP ответил. Остальные порты — из tcp_ports.
 # В Docker/WSL надежнее RAW: compose уже выдает NET_RAW.
 # DGRAM можно использовать без sudo на Linux, если разрешен net.ipv4.ping_group_range.
-socket_type = "RAW" # DGRAM or RAW
+socket_type = "DGRAM" # DGRAM or RAW
 ping_type = [
     "ICMP",
     "TCP"
