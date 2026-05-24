@@ -112,14 +112,19 @@ socket_type = "DGRAM"
 ```bash
 ./build.sh
 export PATH="$HOME/.local/bin:$PATH"
-pizdos-scanner geoip-list
-pizdos-scanner geoip-scan ru
 ```
 
 Системная установка:
 
 ```bash
 INSTALL_DIR=/usr/local/bin sudo ./build.sh
+```
+
+Запуск:
+
+```bash
+pizdos-scanner geoip-list
+pizdos-scanner geoip-scan ru
 ```
 
 Другие команды:
@@ -232,6 +237,7 @@ docker compose run --rm pizdos-scanner geoip-scan telegram
 После `./build.sh`:
 
 ```bash
+pizdos-scanner geoip-list
 pizdos-scanner geoip-scan ru
 pizdos-scanner geoip-scan cn private
 pizdos-scanner geoip-scan telegram
