@@ -1,0 +1,31 @@
+[package]
+name = "pizdos-scanner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+maxminddb = "0.27.1"
+ipnetwork = "0.21.1"
+anyhow = "1.0.72"
+toml = "0.9.8"
+ping = "0.7.1-beta.1"
+serde = { version = "1.0.228", features = ["derive"] }
+chrono = "0.4.43"
+serde_json = "1.0.149"
+serde_with = "3.16.1"
+tokio = { version = "1.42.2", features = ["full", "fs"] }
+rayon = "1.11.0"
+colored = "3.1.1"
+clap = { version = "4.5", features = ["derive"] }
+#trust-dns-resolver = "0.23.2"
+dns-lookup = "3.0.1"
+reqwest = { version = "0.13.1", features = ["blocking", "json", "stream", "native-tls", "gzip", "brotli"] }
+regex = "1.12.2"
+indicatif = "0.18.3"
+futures = "0.3.31"
+futures-util = "0.3.31"
+bytes = "1.11.0"
+prost = "0.14.1"
+
+[profile.release]
+strip = true

@@ -1,0 +1,56 @@
+#geoip_city_db = "/home/user/GeoLite2-City.mmdb"
+#geoip_asn_db = "/home/user/GeoLite2-ASN.mmdb"
+geoip_dat_path = "geoip.dat"
+geoip_codes = ["cn"]
+socket_type = "DGRAM" # DGRAM or RAW (for sudo or windows)
+ping_type = [
+    "ICMP",
+    "TCP"
+]
+operator = "beeline"
+endpoint = "77.88.8.8"
+results_dir = "results"
+resume_state_dir = "results/state"
+resume = true
+tcp_ports = [80, 443]
+# Для HTTPS/TLS TCP-проверки с SNI. Если включить, tcp_ports должны быть TLS-портами.
+#tcp_sni_host = "example.com"
+logger_filetype = [     # csv, json
+#    "Csv",
+#    "Json"
+]
+ipinfo_providers = [
+    "ip-api.com",
+    "ipinfo.com",
+    "ipwho.is",
+    "ip.sb",
+    "ipapi.co",
+    "GeoIP"
+]
+
+# Только для старой команды `subnets`; `geoip-scan` берет сети из geoip.dat.
+subnets = []
+
+[task]
+stop_every_times = 0
+#stop_action = "Delay"
+#stop_action = "ChangeIp" 
+stop_action = "Prompt"
+change_ip_url = "http://127.0.0.1/changeIp"
+delay_seconds = 5
+# task = { stop_every_times = 1, stop_action = "Prompt", change_ip_url = "http://127.0.0.1" }
+
+[[db_update]]
+db_type = "GeoLite2City"
+update_urls = [
+    "https://git.io/GeoLite2-City.mmdb",
+    "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb"
+]
+
+[[db_update]]
+db_type = "GeoLite2ASN"
+update_urls = [
+    "https://git.io/GeoLite2-ASN.mmdb",
+    "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb"
+]
+

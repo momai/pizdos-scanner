@@ -1,0 +1,18 @@
+name: pizdos-scanner
+
+services:
+  pizdos-scanner:
+    build: .
+    image: pizdos-scanner
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    working_dir: /app
+    cap_add:
+      - NET_RAW
+    volumes:
+      - ./geoip.dat:/app/geoip.dat:ro
+      - ./config.toml:/app/config.toml:ro
+      - ./db:/app/db:ro
+      - ./results:/app/results
+    command: ["geoip-scan", "ru"]
