@@ -19,6 +19,7 @@ pub struct Config {
     pub subnets: Vec<String>,
     pub operator: Option<String>,
     pub endpoint: String,
+    pub endpoint_failure_action: Option<ConfigEndpointFailureAction>,
     pub results_dir: Option<String>,
     pub resume_state_dir: Option<String>,
     pub resume: Option<bool>,
@@ -60,6 +61,12 @@ pub struct ConfigDBUpdate {
 pub enum ConfigSaveResultFileType {
     Csv,
     Json
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+pub enum ConfigEndpointFailureAction {
+    Stop,
+    ChangeIp
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -104,6 +111,12 @@ impl Config {
 
     pub fn network_interface(&self) -> Option<&str> {
         self.network_interface.as_deref()
+    }
+
+    pub fn endpoint_failure_action(&self) -> ConfigEndpointFailureAction {
+        self.endpoint_failure_action
+            .clone()
+            .unwrap_or(ConfigEndpointFailureAction::Stop)
     }
 
     pub fn load(path: &str) -> anyhow::Result<Self> {
@@ -169,6 +182,17 @@ impl Config {
                     }
                 },
                 _ => {},
+            }
+        }
+
+        if config.endpoint_failure_action() == ConfigEndpointFailureAction::ChangeIp {
+            let has_change_ip_url = config
+                .task
+                .as_ref()
+                .and_then(|task| task.change_ip_url.as_ref())
+                .is_some();
+            if !has_change_ip_url {
+                anyhow::bail!("task.change_ip_url is required for endpoint_failure_action = ChangeIp");
             }
         }
 

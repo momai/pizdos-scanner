@@ -146,11 +146,24 @@ results/state/<job_id>.json
 
 ```toml
 endpoint = "77.88.8.8"
+endpoint_failure_action = "Stop"
 ```
 
-Если endpoint несколько раз подряд не отвечает, скан останавливается, чтобы не молотить в пустоту.
+Если endpoint несколько раз подряд не отвечает, скан делает `endpoint_failure_action`:
 
-Ротация IP настраивается отдельно в `[task]`. По умолчанию она выключена:
+```toml
+endpoint_failure_action = "Stop"
+```
+
+или:
+
+```toml
+endpoint_failure_action = "ChangeIp"
+```
+
+`ChangeIp` дергает `[task].change_ip_url`, ждет `delay_seconds` и проверяет endpoint еще раз.
+
+Плановая ротация IP настраивается отдельно в `[task]`. По умолчанию она выключена:
 
 ```toml
 [task]
@@ -158,7 +171,7 @@ stop_every_times = 0
 stop_action = "Prompt"
 ```
 
-Чтобы менять IP после каждых 10 `/24`, включите `ChangeIp`:
+Чтобы менять IP после каждых 10 `/24`, включите `ChangeIp` в `[task]`:
 
 ```toml
 [task]
@@ -170,7 +183,7 @@ change_ip_url = "http://192.168.1.1/changeIp"
 Логика цикла:
 
 ```text
-скан /24 -> запись результата -> проверка endpoint -> optional task action -> следующая /24
+скан /24 -> запись результата -> endpoint action при проблеме -> periodic task action -> следующая /24
 ```
 
 ## Сетевой интерфейс

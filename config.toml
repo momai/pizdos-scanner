@@ -15,6 +15,11 @@ operator = "beeline"
 # что интернет/маршрут живой. Можно указать IP или hostname.
 endpoint = "77.88.8.8"
 
+# Что делать, если endpoint несколько раз подряд не отвечает:
+# Stop     - остановить скан
+# ChangeIp - дернуть [task].change_ip_url, подождать delay_seconds и проверить endpoint снова
+endpoint_failure_action = "Stop"
+
 results_dir = "results"
 resume_state_dir = "results/state"
 resume = true
@@ -44,7 +49,8 @@ ipinfo_providers = [
 subnets = []
 
 [task]
-# Действие после каждых N обработанных /24 подсетей.
+# Плановое действие после каждых N обработанных /24 подсетей.
+# Нужно для паузы/ротации IP, например чтобы пытаться обходить рейтлимиты.
 # 0 = ничего не делать между подсетями.
 # Например, 10 + stop_action = "ChangeIp" сделает GET на change_ip_url после каждых 10 /24.
 stop_every_times = 0

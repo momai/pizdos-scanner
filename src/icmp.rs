@@ -21,7 +21,7 @@ use crate::utils::{
     save_results_to_file,
     save_results_to_json,
 };
-use crate::init::ConfigStopAction;
+use crate::init::{ConfigEndpointFailureAction, ConfigStopAction};
 use serde::{Deserialize, Serialize};
 
 fn log_time() -> String {
@@ -204,7 +204,6 @@ fn ping_host(
                     Duration::from_secs(2),
                 );
                 if ok {
-                    println!("TCP {}:{} ok", ip, port);
                     res = true;
                     break;
                 }
@@ -579,22 +578,49 @@ pub async fn scan_networks(
         state.subnet24_count += 1;
         save_state(&state_path, &mut state)?;
 
-        let mut cnt: u32 = 0;
+        let mut endpoint_available = false;
         let max_loop: u32 = 6;
-        for _ in 0..max_loop {
+        for cnt in 0..max_loop {
             if ping_endpoint(&endpoint, 1, config.socket_type.as_ref().unwrap(), network_interface) {
+                endpoint_available = true;
                 break;
-            } else {
-                if cnt == 5 {
-                    eprintln!("❌  Endpoint [{}] unavailable, stopping", endpoint);
-                    save_state(&state_path, &mut state)?;
-                    return Err(anyhow::Error::msg("Endpoint unavailable"));
-                }
+            }
+
+            if cnt + 1 < max_loop {
                 let delay = if cnt < 4 { 5000 + cnt * 5000 } else { 60000 };
                 eprintln!("⚠️ Endpoint [{}] unavailable, retrying [{}sec] {}/{}", endpoint, delay / 1000, cnt + 1, max_loop);
                 tokio::time::sleep(Duration::from_millis(delay as u64)).await;
             }
-            cnt = cnt + 1;
+        }
+
+        if !endpoint_available {
+            match config.endpoint_failure_action() {
+                ConfigEndpointFailureAction::Stop => {
+                    eprintln!("❌ Endpoint [{}] unavailable, stopping", endpoint);
+                    save_state(&state_path, &mut state)?;
+                    return Err(anyhow::Error::msg("Endpoint unavailable"));
+                }
+                ConfigEndpointFailureAction::ChangeIp => {
+                    let task = config
+                        .task
+                        .as_ref()
+                        .context("task config is required for endpoint_failure_action = ChangeIp")?;
+                    let change_ip_url = task
+                        .change_ip_url
+                        .as_ref()
+                        .context("task.change_ip_url is required for endpoint_failure_action = ChangeIp")?;
+                    eprintln!("⚠️ Endpoint [{}] unavailable, requesting IP rotation", endpoint);
+                    crate::utils::change_ip(change_ip_url).await?;
+                    let delay_seconds = task.delay_seconds.unwrap_or(5);
+                    sleep(Duration::from_secs(delay_seconds)).await;
+
+                    if !ping_endpoint(&endpoint, 1, config.socket_type.as_ref().unwrap(), network_interface) {
+                        eprintln!("❌ Endpoint [{}] still unavailable after IP rotation, stopping", endpoint);
+                        save_state(&state_path, &mut state)?;
+                        return Err(anyhow::Error::msg("Endpoint unavailable after IP rotation"));
+                    }
+                }
+            }
         }
 
         if stop_every != 0 && state.subnet24_count % stop_every == 0 {
