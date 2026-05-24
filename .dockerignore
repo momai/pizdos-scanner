@@ -1,0 +1,9 @@
+target/
+results/
+db/
+geoip.dat
+.git/
+.idea/
+.vscode/
+*.log
+*.tmp
