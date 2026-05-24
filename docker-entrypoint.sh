@@ -6,7 +6,13 @@ if [ "$(id -u)" = "0" ] && [ -d /app/results ]; then
     gid="$(stat -c '%g' /app/results)"
 
     if [ "$uid" != "0" ]; then
-        exec setpriv --reuid "$uid" --regid "$gid" --clear-groups pizdos-scanner "$@"
+        exec setpriv \
+            --reuid "$uid" \
+            --regid "$gid" \
+            --clear-groups \
+            --inh-caps +net_raw \
+            --ambient-caps +net_raw \
+            pizdos-scanner "$@"
     fi
 fi
 

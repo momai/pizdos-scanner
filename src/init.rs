@@ -24,6 +24,7 @@ pub struct Config {
     pub resume: Option<bool>,
     pub tcp_ports: Option<Vec<u16>>,
     pub tcp_sni_host: Option<String>,
+    pub network_interface: Option<String>,
     pub socket_type: Option<ConfigSocketType>,
     pub ping_type: Vec<ConfigPingType>,
     pub logger_filetype: Vec<ConfigSaveResultFileType>,
@@ -99,6 +100,10 @@ impl Config {
 
     pub fn resume_enabled(&self) -> bool {
         self.resume.unwrap_or(true)
+    }
+
+    pub fn network_interface(&self) -> Option<&str> {
+        self.network_interface.as_deref()
     }
 
     pub fn load(path: &str) -> anyhow::Result<Self> {

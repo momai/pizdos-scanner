@@ -35,6 +35,7 @@ pub async fn ping_subnet_matrix_rayon(
     ping_type: &Vec<ConfigPingType>,
     tcp_ports: &[u16],
     tcp_sni_host: Option<&str>,
+    network_interface: Option<&str>,
 ) -> anyhow::Result<String> {
 
     let base_octets: Vec<&str> = base_ip.split('.').collect();
@@ -42,7 +43,7 @@ pub async fn ping_subnet_matrix_rayon(
         anyhow::bail!("Wrong IP format");
     }
 
-    if !ping_host("127.0.0.1".parse()?, 1, &socket_type, &vec![ConfigPingType::ICMP], &[], None) {
+    if !ping_host("127.0.0.1".parse()?, 1, &socket_type, &vec![ConfigPingType::ICMP], &[], None, None) {
         anyhow::bail!("PING («{:?}» socket type) not available", &socket_type);
     }
 
@@ -58,7 +59,7 @@ pub async fn ping_subnet_matrix_rayon(
         .into_par_iter()
         .map(|i| {
             let ip = IpAddr::V4(Ipv4Addr::new(a, b, c, i));
-            let alive = ping_host(ip, attempts, &socket_type, &ping_type, tcp_ports, tcp_sni_host);
+            let alive = ping_host(ip, attempts, &socket_type, &ping_type, tcp_ports, tcp_sni_host, network_interface);
             (i, alive)
         })
         .collect();
@@ -113,12 +114,14 @@ pub async fn ping_subnet_matrix_rayon(
     let mut pings: Vec<Duration> = vec![];
 
     for _ in 0..3 {
-        match ping::new(first_ip)
-            .socket_type(socket)
-            .timeout(Duration::from_secs(1))
-            // .ttl(128)
-            .send()
-        {
+        let mut ping = ping::new(first_ip);
+        ping.socket_type(socket).timeout(Duration::from_secs(1));
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if let Some(network_interface) = network_interface {
+            ping.bind_device(network_interface);
+        }
+
+        match ping.send() {
             Ok(r) => {
                 pings.push(r.rtt);
             },
@@ -164,6 +167,7 @@ fn ping_host(
     ping_type: &Vec<ConfigPingType>,
     tcp_ports: &[u16],
     tcp_sni_host: Option<&str>,
+    network_interface: Option<&str>,
 ) -> bool {
 
     let socket = match socket_type {
@@ -177,7 +181,14 @@ fn ping_host(
 
     for _ in 0..attempts {
         if ping_type.contains(&ConfigPingType::ICMP) {
-            match Ping::new(ip).timeout(Duration::from_secs(1)).socket_type(socket).send() {
+            let mut ping = Ping::new(ip);
+            ping.timeout(Duration::from_secs(1)).socket_type(socket);
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            if let Some(network_interface) = network_interface {
+                ping.bind_device(network_interface);
+            }
+
+            match ping.send() {
                 Ok(_) => res = true,
                 Err(_) => std::thread::sleep(Duration::from_millis(200)),
             }
@@ -189,6 +200,7 @@ fn ping_host(
                     ip,
                     *port,
                     tcp_sni_host,
+                    network_interface,
                     Duration::from_secs(2),
                 );
                 if ok {
@@ -207,7 +219,12 @@ fn ping_host(
     res
 }
 
-fn ping_endpoint(endpoint: &String, attempts: u8, socket_type: &ConfigSocketType) -> bool {
+fn ping_endpoint(
+    endpoint: &String,
+    attempts: u8,
+    socket_type: &ConfigSocketType,
+    network_interface: Option<&str>,
+) -> bool {
 
     let ip: IpAddr = if endpoint.parse::<Ipv4Addr>().is_err() {
         let endpoint_host: String = if !endpoint.contains(":") {
@@ -228,7 +245,7 @@ fn ping_endpoint(endpoint: &String, attempts: u8, socket_type: &ConfigSocketType
         endpoint.parse().unwrap()
     };
 
-    ping_host(ip, attempts, socket_type, &vec![ConfigPingType::ICMP], &[], None)
+    ping_host(ip, attempts, socket_type, &vec![ConfigPingType::ICMP], &[], None, network_interface)
 }
 
 async fn process_subnet(
@@ -240,6 +257,7 @@ async fn process_subnet(
     ping_type: &Vec<ConfigPingType>,
     tcp_ports: &[u16],
     tcp_sni_host: Option<&str>,
+    network_interface: Option<&str>,
 ) -> anyhow::Result<(Ipv4Network, SubnetInfo, usize)> {
     // Получаем GeoIP информацию для первого IP подсети
     let first_ip = subnet.network();
@@ -263,7 +281,7 @@ async fn process_subnet(
     let successful_hosts: usize = hosts
         .par_iter()
         .map(|&ip| {
-            if ping_host(ip, 2, socket_type, ping_type, tcp_ports, tcp_sni_host) {
+            if ping_host(ip, 2, socket_type, ping_type, tcp_ports, tcp_sni_host, network_interface) {
                 1
             } else {
                 0
@@ -462,7 +480,7 @@ pub async fn scan_networks(
         }
     };
 
-    if !ping_host("127.0.0.1".parse()?, 1, &config.socket_type.as_ref().unwrap(), &vec![ConfigPingType::ICMP], &[], None) {
+    if !ping_host("127.0.0.1".parse()?, 1, &config.socket_type.as_ref().unwrap(), &vec![ConfigPingType::ICMP], &[], None, None) {
         anyhow::bail!("PING («{:?}» socket type) not available", &config.socket_type.as_ref().unwrap())
     }
 
@@ -470,6 +488,7 @@ pub async fn scan_networks(
     let endpoint = config.endpoint.clone();
     let tcp_ports = config.tcp_ports();
     let tcp_sni_host = config.tcp_sni_host.as_deref();
+    let network_interface = config.network_interface();
     let source = scan_source(scan_name);
     let fallback_country = fallback_country_for_source(&source);
     let all_subnets = expand_to_24(&networks)?;
@@ -503,6 +522,9 @@ pub async fn scan_networks(
     } else {
         println!("CONTROL endpoint={}, task_action=off", endpoint);
     }
+    if let Some(network_interface) = network_interface {
+        println!("NETWORK interface={} (SO_BINDTODEVICE)", network_interface);
+    }
     println!(
         "SCAN {}: {} /24 subnets, state {}",
         scan_name,
@@ -529,6 +551,7 @@ pub async fn scan_networks(
             &config.ping_type,
             &tcp_ports,
             tcp_sni_host,
+            network_interface,
         ).await {
             Ok(result) => {
                 let iteration_time = iteration_start.elapsed();
@@ -559,7 +582,7 @@ pub async fn scan_networks(
         let mut cnt: u32 = 0;
         let max_loop: u32 = 6;
         for _ in 0..max_loop {
-            if ping_endpoint(&endpoint, 1, config.socket_type.as_ref().unwrap()) {
+            if ping_endpoint(&endpoint, 1, config.socket_type.as_ref().unwrap(), network_interface) {
                 break;
             } else {
                 if cnt == 5 {

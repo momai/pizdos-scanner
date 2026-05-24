@@ -155,6 +155,7 @@ async fn main() -> Result<()> {
                 &config.ping_type,
                 &tcp_ports,
                 config.tcp_sni_host.as_deref(),
+                config.network_interface(),
             ).await?;
 
             match subcommand {
@@ -188,12 +189,14 @@ async fn main() -> Result<()> {
             let mut pings: Vec<Duration> = vec![];
 
             for _ in 0..3 {
-                match ping::new(ip_parsed)
-                    .socket_type(socket)
-                    .timeout(Duration::from_secs(1))
-                    // .ttl(128)
-                    .send()
-                {
+                let mut ping = ping::new(ip_parsed);
+                ping.socket_type(socket).timeout(Duration::from_secs(1));
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                if let Some(network_interface) = config.network_interface() {
+                    ping.bind_device(network_interface);
+                }
+
+                match ping.send() {
                     Ok(r) => {
                         pings.push(r.rtt);
                     },
@@ -207,7 +210,12 @@ async fn main() -> Result<()> {
         },
         Some(Command::Test { ip, ports, sni }) => {
             if ip.is_some() && ports.is_some() {
-                tcp_ping::test_tcp_ping(&String::from(ip.unwrap()), &ports.unwrap(), sni.as_deref()).await?;
+                tcp_ping::test_tcp_ping(
+                    &String::from(ip.unwrap()),
+                    &ports.unwrap(),
+                    sni.as_deref(),
+                    config.network_interface(),
+                ).await?;
             } else {
                 println!("Please specify ip and ports");
             }

@@ -5,6 +5,7 @@ services:
     build: .
     image: pizdos-scanner
     init: true
+    network_mode: host
     stop_signal: SIGINT
     stop_grace_period: 15s
     working_dir: /app

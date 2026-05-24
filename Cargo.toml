@@ -26,6 +26,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 bytes = "1.11.0"
 prost = "0.14.1"
+socket2 = { version = "0.6.3", features = ["all"] }
 
 [profile.release]
 strip = true

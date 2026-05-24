@@ -81,6 +81,9 @@ docker compose down --remove-orphans
 docker ps --filter ancestor=pizdos-scanner
 ```
 
+Compose запускается с `network_mode: host`, чтобы контейнер использовал сеть хоста.
+Для ICMP в Docker используется `socket_type = "RAW"` и capability `NET_RAW`.
+
 ## Без Docker
 
 Зависимости Ubuntu/Debian:
@@ -96,6 +99,12 @@ source "$HOME/.cargo/env"
 
 ```bash
 sudo sysctl -w net.ipv4.ping_group_range="0 1000"
+```
+
+Если запускаете без Docker и без `sudo`, можно поставить:
+
+```toml
+socket_type = "DGRAM"
 ```
 
 Сборка и запуск:
@@ -163,6 +172,16 @@ change_ip_url = "http://192.168.1.1/changeIp"
 ```text
 скан /24 -> запись результата -> проверка endpoint -> optional task action -> следующая /24
 ```
+
+## Сетевой интерфейс
+
+По умолчанию маршрут выбирает ОС. Чтобы принудительно слать ICMP/TCP через интерфейс Linux, укажите его в `config.toml`:
+
+```toml
+network_interface = "eth1"
+```
+
+В Docker это работает вместе с `network_mode: host` из `compose.yaml`.
 
 ## Что сканировать
 

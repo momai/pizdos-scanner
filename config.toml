@@ -2,7 +2,9 @@
 #geoip_asn_db = "/home/user/GeoLite2-ASN.mmdb"
 geoip_dat_path = "geoip.dat"
 geoip_codes = ["cn"]
-socket_type = "DGRAM" # DGRAM or RAW (for sudo or windows)
+# В Docker/WSL надежнее RAW: compose уже выдает NET_RAW.
+# DGRAM можно использовать без sudo на Linux, если разрешен net.ipv4.ping_group_range.
+socket_type = "RAW" # DGRAM or RAW
 ping_type = [
     "ICMP",
     "TCP"
@@ -19,6 +21,12 @@ resume = true
 tcp_ports = [80, 443]
 # Для HTTPS/TLS TCP-проверки с SNI. Если включить, tcp_ports должны быть TLS-портами.
 #tcp_sni_host = "example.com"
+
+# Принудительно слать ICMP/TCP через конкретный сетевой интерфейс Linux.
+# Оставьте закомментированным, чтобы выбирать маршрут по системной таблице маршрутизации.
+# В Docker для этого включен network_mode: host в compose.yaml.
+network_interface = "eth0"
+
 logger_filetype = [     # csv, json
 #    "Csv",
 #    "Json"
