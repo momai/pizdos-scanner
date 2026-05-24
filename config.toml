@@ -1,6 +1,6 @@
 # Что сканировать. geoip-scan берет CIDR из Xray/V2Ray geoip.dat.
 geoip_dat_path = "geoip.dat"
-geoip_codes = ["cn"]
+geoip_codes = ["ru"]
 
 # Как проверять хосты. Сначала ICMP, если не ответил - TCP по tcp_ports.
 # В Docker/WSL надежнее RAW: compose уже выдает NET_RAW.
