@@ -68,12 +68,10 @@ jobs:
             git clone https://github.com/momai/pizdos-scanner
             cd pizdos-scanner
 
-            docker pull ghcr.io/momai/pizdos-scanner:${{ github.ref_name }}
-            export PIZDOS_SCANNER_IMAGE=ghcr.io/momai/pizdos-scanner:${{ github.ref_name }}
+            docker pull ghcr.io/momai/pizdos-scanner:latest
             curl -L -o geoip.dat \
               https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 
-            docker compose pull
             docker compose run --rm pizdos-scanner geoip-scan ru
             ```
 
