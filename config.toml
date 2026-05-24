@@ -1,15 +1,24 @@
-#geoip_city_db = "/home/user/GeoLite2-City.mmdb"
-#geoip_asn_db = "/home/user/GeoLite2-ASN.mmdb"
+# Что сканировать. geoip-scan берет CIDR из Xray/V2Ray geoip.dat.
 geoip_dat_path = "geoip.dat"
 geoip_codes = ["cn"]
+
+# Как проверять хосты. Сначала ICMP, если не ответил - TCP по tcp_ports.
 # В Docker/WSL надежнее RAW: compose уже выдает NET_RAW.
 # DGRAM можно использовать без sudo на Linux, если разрешен net.ipv4.ping_group_range.
-socket_type = "RAW" # DGRAM or RAW
+socket_type = "DGRAM" # DGRAM or RAW
 ping_type = [
     "ICMP",
     "TCP"
 ]
-operator = "beeline"
+tcp_ports = [80, 443]
+
+# Для HTTPS/TLS TCP-проверки с SNI. Если включить, tcp_ports должны быть TLS-портами.
+#tcp_sni_host = "example.com"
+
+# Принудительно слать ICMP/TCP через конкретный сетевой интерфейс Linux.
+# Оставьте закомментированным, чтобы выбирать маршрут по системной таблице маршрутизации.
+# В Docker для этого включен network_mode: host в compose.yaml.
+# network_interface = "eth0"
 
 # Контрольный "белый" endpoint. После каждой /24 подсети сканер проверяет,
 # что интернет/маршрут живой. Можно указать IP или hostname.
@@ -20,22 +29,23 @@ endpoint = "77.88.8.8"
 # ChangeIp - дернуть [task].change_ip_url, подождать delay_seconds и проверить endpoint снова
 endpoint_failure_action = "Stop"
 
+# Результаты и resume.
 results_dir = "results"
 resume_state_dir = "results/state"
 resume = true
-tcp_ports = [80, 443]
-# Для HTTPS/TLS TCP-проверки с SNI. Если включить, tcp_ports должны быть TLS-портами.
-#tcp_sni_host = "example.com"
 
-# Принудительно слать ICMP/TCP через конкретный сетевой интерфейс Linux.
-# Оставьте закомментированным, чтобы выбирать маршрут по системной таблице маршрутизации.
-# В Docker для этого включен network_mode: host в compose.yaml.
-network_interface = "eth0"
+# Просто метка для имени файлов результата и отдельного resume state.
+operator = "beeline"
 
 logger_filetype = [     # csv, json
 #    "Csv",
 #    "Json"
 ]
+
+# GeoIP-обогащение результатов. Не обязательно для скана, но дает city/asn/as_name.
+#geoip_city_db = "/home/user/GeoLite2-City.mmdb"
+#geoip_asn_db = "/home/user/GeoLite2-ASN.mmdb"
+
 ipinfo_providers = [
     "ip-api.com",
     "ipinfo.com",
@@ -48,6 +58,7 @@ ipinfo_providers = [
 # Только для старой команды `subnets`; `geoip-scan` берет сети из geoip.dat.
 subnets = []
 
+# Плановая пауза/ротация между подсетями.
 [task]
 # Плановое действие после каждых N обработанных /24 подсетей.
 # Нужно для паузы/ротации IP, например чтобы пытаться обходить рейтлимиты.
