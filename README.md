@@ -1,90 +1,76 @@
 # pizdos-scanner
 
-Сканер `/24` подсетей: ICMP — информативно, TCP 443 проверяется всегда (даже если ping ответил), плюс порты из `tcp_ports`. Умеет брать сети из Xray/V2Ray `geoip.dat`, писать результаты в `results/` и продолжать скан после остановки.
+Сканер `/24` подсетей из Xray/V2Ray `geoip.dat`. ICMP используется как дополнительный сигнал, TCP 443 проверяется всегда, остальные TCP-порты берутся из `tcp_ports` в `config.toml`. Результаты пишутся инкрементально в `results/`, поэтому скан можно остановить и продолжить той же командой.
 
-## Подготовить данные
-
-`geoip.dat` скачайте из [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) и положите в корень проекта.
+## Быстрый старт
 
 ```bash
-cd <project-dir>
+cd pizdos-scanner
+curl -L -o geoip.dat \
+  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+
+docker compose up --build
+```
+
+По умолчанию `compose.yaml` запускает `geoip-scan ru`. Чтобы посмотреть доступные списки или запустить другой скан:
+
+```bash
+docker compose run --rm pizdos-scanner geoip-list
+docker compose run --rm pizdos-scanner geoip-scan telegram
+docker compose run --rm pizdos-scanner geoip-scan cn private
+```
+
+Остановить скан можно через `Ctrl+C`. Повторный запуск той же команды продолжит обработку с уже сохраненного состояния.
+
+## Данные GeoIP
+
+Обязателен только `geoip.dat` в корне проекта:
+
+```bash
 ls -lh geoip.dat
 ```
 
-MaxMind `.mmdb` нужны только для колонок `city`, `asn`, `as_name`. Без них скан работает, но эти поля будут `N/A`.
+MaxMind `.mmdb` нужны только для колонок `city`, `asn`, `as_name`. Без них скан работает, но эти поля будут `N/A`. Папка `db/` уже есть в репе:
 
 ```bash
-cd <project-dir>
-sudo chown -R "$USER:$USER" .
-mkdir -p db results
-
 curl -L -o db/GeoLite2-City.mmdb \
   https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
 
 curl -L -o db/GeoLite2-ASN.mmdb \
   https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
-
-ls -lh db
 ```
 
-## Docker Compose
+## Полезные команды
 
-Собрать образ:
-
-```bash
-docker compose build
-```
-
-Посмотреть списки из `geoip.dat`:
+Через Docker:
 
 ```bash
 docker compose run --rm pizdos-scanner geoip-list
-```
-
-Сканировать весь RU:
-
-```bash
-docker compose up
-```
-
-Остановить скан:
-
-```bash
-Ctrl+C
-docker compose down --remove-orphans
-```
-
-Продолжить скан:
-
-```bash
-docker compose up
-```
-
-Сканировать другой список:
-
-```bash
+docker compose run --rm pizdos-scanner geoip-scan ru
 docker compose run --rm pizdos-scanner geoip-scan telegram
-docker compose run --rm pizdos-scanner geoip-scan cn private
-```
-
-TCP test:
-
-```bash
 docker compose run --rm pizdos-scanner test 1.1.1.1 80 443
 docker compose run --rm pizdos-scanner test 1.1.1.1 443 --sni example.com
 ```
 
-Если зависли старые контейнеры:
+После локальной установки:
+
+```bash
+pizdos-scanner geoip-list
+pizdos-scanner geoip-scan ru
+pizdos-scanner geoip-scan cn private
+pizdos-scanner test 1.1.1.1 80 443
+pizdos-scanner subnet 1.1.1.1
+pizdos-scanner subnets
+```
+
+Если после Docker-запуска остались старые контейнеры:
 
 ```bash
 docker compose down --remove-orphans
 docker ps --filter ancestor=pizdos-scanner
 ```
 
-Compose запускается с `network_mode: host`, чтобы контейнер использовал сеть хоста.
-Для ICMP в Docker используется `socket_type = "RAW"` и capability `NET_RAW`.
-
-## Без Docker
+## Локальная установка
 
 Зависимости Ubuntu/Debian:
 
@@ -93,18 +79,6 @@ sudo apt update
 sudo apt install -y build-essential pkg-config libssl-dev curl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-```
-
-Для ICMP без `sudo`:
-
-```bash
-sudo sysctl -w net.ipv4.ping_group_range="0 1000"
-```
-
-Если запускаете без Docker и без `sudo`, можно поставить:
-
-```toml
-socket_type = "DGRAM"
 ```
 
 Сборка и установка в `~/.local/bin`:
@@ -120,68 +94,83 @@ export PATH="$HOME/.local/bin:$PATH"
 INSTALL_DIR=/usr/local/bin sudo ./build.sh
 ```
 
-Запуск:
+Для ICMP без `sudo` на Linux можно использовать `DGRAM` и разрешить ping для группы:
 
 ```bash
-pizdos-scanner geoip-list
+sudo sysctl -w net.ipv4.ping_group_range="0 1000"
+```
+
+```toml
+socket_type = "DGRAM"
+```
+
+В Docker используется `network_mode: host`, capability `NET_RAW` и RAW-сокеты.
+
+## Конфиг скана
+
+Основные параметры в `config.toml`:
+
+```toml
+geoip_dat_path = "geoip.dat"
+geoip_codes = ["ru"]
+
+ping_type = ["ICMP", "TCP"]
+tcp_ports = [80, 443]
+
+results_dir = "results"
+resume_state_dir = "results/state"
+resume = true
+```
+
+`geoip-scan` без аргументов берет списки из `geoip_codes`. Аргументы команды переопределяют конфиг:
+
+```bash
 pizdos-scanner geoip-scan ru
+pizdos-scanner geoip-scan cn private
 ```
 
-Другие команды:
+Если нужен SNI для TLS-проверки, включите его в конфиг или передайте в тестовой команде:
+
+```toml
+tcp_sni_host = "example.com"
+```
 
 ```bash
-pizdos-scanner test 1.1.1.1 80 443
-pizdos-scanner subnet 1.1.1.1
-pizdos-scanner subnets
+pizdos-scanner test 1.1.1.1 443 --sni example.com
 ```
 
-## Resume и результаты
+## Результаты и resume
 
-Результаты пишутся сразу после каждой `/24`:
+Результаты пишутся после каждой `/24`:
 
 ```text
 results/*.csv
 results/*.jsonl
-```
-
-CSV содержит короткую сводку по `/24`: `icmp_hosts`, `active_hosts` и отдельные колонки по каждому TCP-порту, например `tcp_80_hosts`, `tcp_443_hosts`. JSONL пишет расширенную запись: сводку плюс компактный `probe` с диапазонами последних октетов. Например, `tcp_ports: {"80": ["6", "8-12"], "443": ["6", "8-12"]}`, `dead: ["76-254"]`.
-
-Прогресс хранится тут:
-
-```text
 results/state/<job_id>.json
 ```
 
-Если остановить скан и запустить ту же команду снова, он продолжит с пропуском уже обработанных `/24`.
+CSV содержит сводку по подсети: `icmp_hosts`, `active_hosts` и отдельные колонки по каждому TCP-порту, например `tcp_80_hosts`, `tcp_443_hosts`.
+
+JSONL содержит расширенную запись со сводкой и компактным `probe`: диапазоны последних октетов для `icmp`, `tcp_ports` и `dead`, например `tcp_ports: {"80": ["6", "8-12"], "443": ["6", "8-12"]}`.
+
+Если остановить скан и запустить ту же команду снова, сканер пропустит уже обработанные `/24`.
 
 ## Endpoint и ротация IP
 
-Практически это страховка для долгого скана: endpoint показывает, что внешний маршрут еще жив, а ротация дает сменить IP/маршрут при отвале, бане или лимитах провайдера.
-
-После каждой `/24` сканер проверяет контрольный endpoint из `config.toml`:
+После каждой `/24` сканер проверяет контрольный endpoint:
 
 ```toml
 endpoint = "77.88.8.8"
 endpoint_failure_action = "Stop"
 ```
 
-Если endpoint несколько раз подряд не отвечает, скан делает `endpoint_failure_action`:
-
-```toml
-endpoint_failure_action = "Stop"
-```
-
-или:
+Если endpoint несколько раз подряд не отвечает, доступны два действия: `Stop` остановит скан, `ChangeIp` дернет HTTP-хук ротации.
 
 ```toml
 endpoint_failure_action = "ChangeIp"
 ```
 
-`ChangeIp` дергает `[task].change_ip_url`, ждет `delay_seconds` и проверяет endpoint еще раз.
-
-`change_ip_url` — это ваш внешний HTTP-хук для смены IP. Сканер сам не умеет переподключать модем, VPN или прокси; он просто делает GET-запрос на этот URL. На той стороне может быть скрипт, API роутера, панель прокси или локальный сервис, который реально меняет маршрут/IP.
-
-Пример:
+`ChangeIp` делает GET на `[task].change_ip_url`, ждет `delay_seconds` и проверяет endpoint снова. Сканер сам не переключает модем, VPN или прокси; это должен делать внешний HTTP-хук.
 
 ```toml
 [task]
@@ -189,9 +178,7 @@ change_ip_url = "http://127.0.0.1:8080/change-ip"
 delay_seconds = 10
 ```
 
-Практически это используется так: сканер закончил `/24` или увидел, что endpoint не отвечает, дернул `change_ip_url`, подождал `delay_seconds`, затем продолжил проверку уже после смены IP.
-
-Плановая ротация IP настраивается отдельно в `[task]`. По умолчанию она выключена:
+Плановая ротация между подсетями настраивается отдельно. По умолчанию она выключена:
 
 ```toml
 [task]
@@ -199,61 +186,28 @@ stop_every_times = 0
 stop_action = "Prompt"
 ```
 
-Чтобы менять IP после каждых 10 `/24`, включите `ChangeIp` в `[task]`:
+Пример смены IP после каждых 10 `/24`:
 
 ```toml
 [task]
 stop_every_times = 10
 stop_action = "ChangeIp"
 change_ip_url = "http://192.168.1.1/changeIp"
+delay_seconds = 10
 ```
 
-Логика цикла:
+Цикл обработки:
 
 ```text
-скан /24 -> запись результата -> endpoint action при проблеме -> periodic task action -> следующая /24
+скан /24 -> запись результата -> проверка endpoint -> плановое действие -> следующая /24
 ```
 
 ## Сетевой интерфейс
 
-По умолчанию маршрут выбирает ОС. Чтобы принудительно слать ICMP/TCP через интерфейс Linux, укажите его в `config.toml`:
+По умолчанию маршрут выбирает ОС. Чтобы принудительно слать ICMP/TCP через конкретный интерфейс Linux:
 
 ```toml
 network_interface = "eth1"
 ```
 
 В Docker это работает вместе с `network_mode: host` из `compose.yaml`.
-
-## Что сканировать
-
-Через Docker:
-
-```bash
-docker compose run --rm pizdos-scanner geoip-scan ru
-docker compose run --rm pizdos-scanner geoip-scan cn private
-docker compose run --rm pizdos-scanner geoip-scan telegram
-```
-
-После `./build.sh`:
-
-```bash
-pizdos-scanner geoip-list
-pizdos-scanner geoip-scan ru
-pizdos-scanner geoip-scan cn private
-pizdos-scanner geoip-scan telegram
-```
-
-Через `config.toml`:
-
-```toml
-geoip_codes = ["ru"]
-tcp_ports = [80, 443]
-resume = true
-```
-
-Чтобы не было действий после каждой `/24`, должно быть:
-
-```toml
-[task]
-stop_every_times = 0
-```
