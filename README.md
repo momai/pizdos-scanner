@@ -11,14 +11,19 @@ ICMP используется как дополнительный сигнал, 
 
 Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
 
+Скачайте бинарь и файлы geoip. 
 ```bash
 curl -L -o pizdos-scanner \
   https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-x86_64
-chmod +x pizdos-scanner
-
-mkdir -p db
 curl -L -o geoip.dat \
-  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat  
+chmod +x pizdos-scanner
+```
+
+Так же, полезно будет скачать mmdb для заполнения полей ASN и City в результатах.
+```bash
+mkdir -p db
+
 curl -L -o db/GeoLite2-City.mmdb \
   https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
 curl -L -o db/GeoLite2-ASN.mmdb \
