@@ -11,55 +11,24 @@ ICMP используется как дополнительный сигнал, 
 
 ## Быстрый старт
 
-### Из бинаря
-
-Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
-
-One-liner автоустановка (x86_64/arm64, включая Raspberry Pi 64-bit):
+### One-liner автоустановка (x86_64/arm64, включая Raspberry Pi 64-bit):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh
 ```
-
-Альтернатива в формате "скачал и запустил":
-
-```bash
-curl -O https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh
-sh install.sh
-```
-
-Скрипт сам:
-- определяет архитектуру,
-- скачивает бинарь, `geoip.dat`, `config.toml`, `db/*.mmdb`, `subnets/*.txt`,
-- устанавливает бинарь:
-  - `root` -> `/usr/local/bin`,
-  - обычный пользователь -> `~/.local/bin`,
-- ставит launcher-обёртку `pizdos-scanner`, которая по умолчанию использует `~/.pizdos-scanner/config.toml` и работает из любой директории,
-- при переустановке не перезаписывает ваш `config.toml` (кладёт свежий шаблон в `config.toml.dist`),
-- для обычного пользователя добавляет `~/.local/bin` в `PATH` (`~/.bashrc`/`~/.zshrc`),
-- готовит рабочую директорию `~/.pizdos-scanner`.
+- Рабочая директория `~/.pizdos-scanner`.
 
 После установки:
 
 ```bash
-cd ~/.pizdos-scanner
+hash -r
+export PATH="/usr/local/bin:$PATH"
+
 pizdos-scanner geoip-scan ru
 ```
 
-Если команда запускает не тот бинарь (старый в PATH), проверьте:
-
-```bash
-hash -r
-type -a pizdos-scanner
-```
-
-Должно быть первым:
-- root: `/usr/local/bin/pizdos-scanner`
-- user: `~/.local/bin/pizdos-scanner`
-
----
-
-Скачайте бинарь под вашу архитектуру:
+### Ручная установка
+:
 
 ```bash
 # x86_64
