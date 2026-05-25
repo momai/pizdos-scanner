@@ -88,13 +88,7 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 docker compose run --rm --no-build pizdos-scanner help
 docker compose run --rm --no-build pizdos-scanner geoip-list
 docker compose run --rm --no-build pizdos-scanner geoip-scan ru
-docker compose run --rm --no-build pizdos-scanner geoip-scan cn private
-docker compose run --rm --no-build pizdos-scanner geoip-scan telegram
-docker compose run --rm --no-build pizdos-scanner subnets subnets.txt
-docker compose run --rm --no-build pizdos-scanner subnet 1.1.1.1
-docker compose run --rm --no-build pizdos-scanner finalize results/<scan>.jsonl
-docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 80 443
-docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 443 --sni example.com
+...
 ```
 
 - Команды делают то же самое, что и в разделе для бинаря, но выполняются внутри контейнера.
