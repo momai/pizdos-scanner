@@ -4,6 +4,8 @@ mod ipinfo;
 mod utils;
 mod geoip;
 mod icmp;
+mod scan_state;
+mod scanner;
 mod tcp_ping;
 mod xray_geoip;
 mod tui;

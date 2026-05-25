@@ -4,6 +4,8 @@ pub mod ipinfo;
 pub mod utils;
 pub mod geoip;
 pub mod icmp;
+pub mod scan_state;
+pub mod scanner;
 pub mod tcp_ping;
 pub mod xray_geoip;
 pub mod tui;
