@@ -6,6 +6,17 @@ use std::path::{Path, PathBuf};
 
 use crate::init::Config;
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub(crate) struct SessionSummary {
+    pub scanned_this_run: usize,
+    pub elapsed_seconds: f64,
+    pub workers: usize,
+    pub rate_total_per_min: f64,
+    pub rate_per_worker_per_min: f64,
+    pub avg_seconds_per_subnet: f64,
+    pub finished_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ScanState {
     pub version: u8,
@@ -25,6 +36,8 @@ pub(crate) struct ScanState {
     pub finished: bool,
     #[serde(default)]
     pub stopped_reason: Option<String>,
+    #[serde(default)]
+    pub last_session: Option<SessionSummary>,
 }
 
 fn timestamp() -> String {
@@ -121,6 +134,7 @@ pub(crate) fn create_state(config: &Config, scan_name: &str, job_id: String) -> 
         updated_at: now,
         finished: false,
         stopped_reason: None,
+        last_session: None,
     }
 }
 

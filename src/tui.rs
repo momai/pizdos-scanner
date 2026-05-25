@@ -146,6 +146,7 @@ struct ScanDashboard {
     scanned_total: usize,
     scanned_this_run: usize,
     completed_subnet_seconds: f64,
+    completion_marks: VecDeque<Instant>,
     alive_subnets: usize,
     icmp_only_subnets: usize,
     dead_subnets: usize,
@@ -293,6 +294,10 @@ impl ScanDashboard {
             self.scanned_this_run += 1;
             self.scanned_total += 1;
             self.completed_subnet_seconds += seconds;
+            self.completion_marks.push_back(Instant::now());
+            while self.completion_marks.len() > 120 {
+                self.completion_marks.pop_front();
+            }
         }
 
         let row = SubnetRow {
@@ -353,11 +358,24 @@ impl ScanDashboard {
     }
 
     fn subnets_per_minute(&self) -> f64 {
+        let marks = self.completion_marks.len();
+        if marks >= 2 {
+            let first = self.completion_marks.front().unwrap();
+            let last = self.completion_marks.back().unwrap();
+            let span = (*last - *first).as_secs_f64();
+            if span > 0.0 {
+                // Completion cadence reflects real throughput in both sequential and parallel modes.
+                return ((marks - 1) as f64 / span) * 60.0;
+            }
+        }
+
+        // Fallback for startup phase (0-1 completed subnet): stable estimate from finished subnet durations.
         let avg_secs = self.avg_subnet_seconds();
         if avg_secs <= 0.0 {
-            return 0.0;
+            0.0
+        } else {
+            60.0 / avg_secs
         }
-        60.0 / avg_secs
     }
 
     fn avg_subnet_seconds(&self) -> f64 {
@@ -368,15 +386,15 @@ impl ScanDashboard {
     }
 
     fn eta_label(&self) -> String {
-        let avg_secs = self.avg_subnet_seconds();
-        if avg_secs <= 0.0 {
+        let subnets_per_min = self.subnets_per_minute();
+        if subnets_per_min <= 0.0 {
             return "—".to_string();
         }
         let remaining = self
             .config
             .total_subnets
             .saturating_sub(self.scanned_total);
-        let mins = (remaining as f64 * avg_secs) / 60.0;
+        let mins = remaining as f64 / subnets_per_min;
         if mins < 60.0 {
             format!("~{:.0}m", mins)
         } else if mins < 60.0 * 48.0 {
@@ -409,6 +427,7 @@ impl Default for ScanDashboard {
             scanned_total: 0,
             scanned_this_run: 0,
             completed_subnet_seconds: 0.0,
+            completion_marks: VecDeque::new(),
             alive_subnets: 0,
             icmp_only_subnets: 0,
             dead_subnets: 0,

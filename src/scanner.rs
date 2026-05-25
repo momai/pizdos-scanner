@@ -5,14 +5,14 @@ mod parallel;
 use anyhow::Context;
 use colored::*;
 use ipnetwork::Ipv4Network;
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, time::{Duration, Instant}};
 use tokio::sync::Semaphore;
 
 use crate::geoip::{GeoIpService, SubnetInfo};
 use crate::icmp::{probe_host, split_ipv4_to_24, ProbeTuning};
 use crate::init::{Config, ConfigPingType, ConfigSaveResultFileType, ConfigSocketType};
 use crate::scan_state::{
-    build_job_id, create_state, load_state, save_state, state_path, ScanProgress,
+    build_job_id, create_state, load_state, save_state, state_path, ScanProgress, SessionSummary,
 };
 use crate::scanner::scan_conditions::{init_scan_ui, StopTargetChecker};
 use crate::scanner::scan_loop::{
@@ -54,6 +54,111 @@ fn icmp_unavailable_hint(socket_type: &ConfigSocketType) -> &'static str {
     }
 }
 
+fn format_elapsed(elapsed: Duration) -> String {
+    let total = elapsed.as_secs();
+    format!(
+        "{:02}:{:02}:{:02}",
+        total / 3600,
+        (total % 3600) / 60,
+        total % 60
+    )
+}
+
+fn build_session_summary(scanned_this_run: usize, elapsed: Duration, workers: usize) -> SessionSummary {
+    let workers = workers.max(1);
+    let elapsed_secs = elapsed.as_secs_f64();
+    if scanned_this_run == 0 || elapsed_secs <= 0.0 {
+        return SessionSummary {
+            scanned_this_run,
+            elapsed_seconds: elapsed_secs,
+            workers,
+            rate_total_per_min: 0.0,
+            rate_per_worker_per_min: 0.0,
+            avg_seconds_per_subnet: 0.0,
+            finished_at: chrono::Local::now().to_rfc3339(),
+        };
+    }
+
+    let rate_total_per_min = scanned_this_run as f64 / elapsed_secs * 60.0;
+    let rate_per_worker_per_min = rate_total_per_min / workers as f64;
+    let avg_seconds_per_subnet = elapsed_secs / scanned_this_run as f64;
+    SessionSummary {
+        scanned_this_run,
+        elapsed_seconds: elapsed_secs,
+        workers,
+        rate_total_per_min,
+        rate_per_worker_per_min,
+        avg_seconds_per_subnet,
+        finished_at: chrono::Local::now().to_rfc3339(),
+    }
+}
+
+fn render_session_report(
+    status: &str,
+    scanned_this_run: usize,
+    total_done: usize,
+    result_path: &str,
+    summary: &SessionSummary,
+    previous: Option<&SessionSummary>,
+) -> String {
+    let finished = status == "Готово";
+    let badge = if finished {
+        " ГОТОВО ".black().on_green().bold().to_string()
+    } else {
+        " СТОП ".black().on_yellow().bold().to_string()
+    };
+
+    let sep = "─".repeat(46).bright_black().to_string();
+
+    // Line 1: status + counts
+    let counts = format!(
+        "всего: {}  •  эта сессия: {}  •  воркеры: {}  •  {}",
+        total_done.to_string().bold(),
+        scanned_this_run.to_string().bold(),
+        summary.workers.to_string().bold(),
+        format_elapsed(Duration::from_secs_f64(summary.elapsed_seconds.max(0.0))).bold(),
+    );
+
+    // Line 2: speed stats for this session (only if scanned > 0)
+    let speed_line = if summary.scanned_this_run > 0 {
+        format!(
+            "  {}  {:.2}/мин  •  {:.1}с/подсеть",
+            "↗ скорость:".bright_cyan(),
+            summary.rate_total_per_min,
+            summary.avg_seconds_per_subnet
+        )
+    } else {
+        format!("  {}", "↗ скорость: нет данных (0 подсетей за сессию)".bright_black())
+    };
+
+    // Line 3: comparison
+    let compare_line = match previous {
+        Some(prev) if prev.rate_total_per_min > 0.0 && summary.rate_total_per_min > 0.0 => {
+            let speedup = summary.rate_total_per_min / prev.rate_total_per_min;
+            let delta_pct = (speedup - 1.0) * 100.0;
+            let (marker, cmp_str) = if delta_pct >= 1.0 {
+                ("↑", format!("x{:.2} ({:+.0}%) — быстрее (пред. {:.2}/мин, {}w)", speedup, delta_pct, prev.rate_total_per_min, prev.workers).green().bold().to_string())
+            } else if delta_pct <= -1.0 {
+                ("↓", format!("x{:.2} ({:+.0}%) — медленнее (пред. {:.2}/мин, {}w)", speedup, delta_pct, prev.rate_total_per_min, prev.workers).yellow().bold().to_string())
+            } else {
+                ("≈", format!("примерно одинаково с предыдущей (пред. {:.2}/мин, {}w)", prev.rate_total_per_min, prev.workers).bright_black().to_string())
+            };
+            format!("  {}  {}", marker.bright_magenta().bold(), cmp_str)
+        }
+        Some(_) => format!("  {}", "≈ сравнение: недостаточно данных".bright_black()),
+        None    => format!("  {}", "≈ первый запуск, сравнение пока недоступно".bright_black()),
+    };
+
+    // Line 4: file path
+    let file_line = format!(
+        "  {}  {}",
+        "📄".bright_black(),
+        result_path.bright_white()
+    );
+
+    format!("{sep}\n{badge}  {counts}\n{speed_line}\n{compare_line}\n{file_line}\n{sep}")
+}
+
 fn expand_to_24(networks: &[String]) -> anyhow::Result<Vec<Ipv4Network>> {
     let mut seen = HashSet::new();
     let mut expanded = Vec::new();
@@ -83,6 +188,7 @@ pub async fn scan_networks(
     scan_name: &str,
     networks: Vec<String>,
 ) -> anyhow::Result<()> {
+    let session_started_at = Instant::now();
     let geoip = match GeoIpService::new(
         &config.geoip_city_db.as_ref().unwrap(),
         &config.geoip_asn_db.as_ref().unwrap(),
@@ -135,6 +241,7 @@ pub async fn scan_networks(
         (true, Some(state)) if !state.finished => state,
         _ => create_state(config, scan_name, job_id),
     };
+    let previous_session = state.last_session.clone();
     save_state(&state_path, &mut state)?;
 
     let mut completed_subnets: HashSet<String> = state.completed_subnets.iter().cloned().collect();
@@ -280,38 +387,54 @@ pub async fn scan_networks(
     }
 
     if interrupted {
+        let session_summary = build_session_summary(
+            scanned_this_run,
+            session_started_at.elapsed(),
+            subnet_parallelism,
+        );
+        state.last_session = Some(session_summary.clone());
         save_state(&state_path, &mut state)?;
-        let msg = format!(
-            "interrupted: {} /24 this run, {} total · resume: {}",
+        let msg = render_session_report(
+            "Остановлено",
             scanned_this_run,
             completed_subnets.len(),
-            state.result_jsonl
+            &state.result_jsonl,
+            &session_summary,
+            previous_session.as_ref(),
         );
         if let Some(ui) = ui.take() {
             ui.log(EventLevel::Wrn, "Остановлено пользователем");
             ui.finish(msg);
         } else {
-            println!("{}", msg.yellow());
+            println!("{msg}");
         }
         return Ok(());
     }
 
     state.finished = true;
     state.stopped_reason = None;
+    let session_summary = build_session_summary(
+        scanned_this_run,
+        session_started_at.elapsed(),
+        subnet_parallelism,
+    );
+    state.last_session = Some(session_summary.clone());
     save_state(&state_path, &mut state)?;
 
-    let done_msg = format!(
-        "done: {} /24 this run, {} total · {}",
+    let done_msg = render_session_report(
+        "Готово",
         scanned_this_run,
         completed_subnets.len(),
-        state.result_jsonl
+        &state.result_jsonl,
+        &session_summary,
+        previous_session.as_ref(),
     );
 
     if let Some(ui) = ui {
         ui.log(EventLevel::Ok, "Скан завершён");
         ui.finish(done_msg);
     } else {
-        println!("{}", done_msg.cyan());
+        println!("{done_msg}");
     }
 
     if !config.logger_filetype.is_empty() {
