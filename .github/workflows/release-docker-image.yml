@@ -89,9 +89,20 @@ jobs:
       - name: Install armv7 toolchain
         if: matrix.target == 'armv7-unknown-linux-gnueabihf'
         run: |
+          sudo dpkg --add-architecture armhf
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabihf \
+            libc6-dev-armhf-cross \
+            pkg-config \
+            pkg-config-arm-linux-gnueabihf \
+            libssl-dev:armhf
           echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=arm-linux-gnueabihf-pkg-config" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig" >> "$GITHUB_ENV"
+          echo "ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf" >> "$GITHUB_ENV"
+          echo "ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include/arm-linux-gnueabihf" >> "$GITHUB_ENV"
 
       - name: Build binary
         run: cargo build --release --locked --target ${{ matrix.target }}
