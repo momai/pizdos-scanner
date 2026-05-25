@@ -45,6 +45,17 @@ cd ~/.pizdos-scanner
 pizdos-scanner geoip-scan ru
 ```
 
+Если команда запускает не тот бинарь (старый в PATH), проверьте:
+
+```bash
+hash -r
+type -a pizdos-scanner
+```
+
+Должно быть первым:
+- root: `/usr/local/bin/pizdos-scanner`
+- user: `~/.local/bin/pizdos-scanner`
+
 ---
 
 Скачайте бинарь под вашу архитектуру:

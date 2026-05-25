@@ -97,6 +97,9 @@ exec "\$REAL_BIN" "\$@"
 EOF
 chmod 755 "$BIN_DIR/$BIN_NAME"
 
+say "==> Installed launcher: $BIN_DIR/$BIN_NAME"
+say "==> Installed binary : $BIN_DIR/${BIN_NAME}.bin"
+
 say "==> Downloading config + geo data"
 curl -fsSL "$CONFIG_URL" -o "$BASE_DIR/config.toml"
 curl -fsSL "$GEOIP_URL" -o "$BASE_DIR/geoip.dat"
@@ -163,4 +166,28 @@ if [ "$PATH_NEEDS_REFRESH" = "1" ]; then
     say "Or reload shell profile:"
     say "  source ~/.bashrc   # or: source ~/.zshrc"
   fi
+fi
+
+say "==> Running post-install checks"
+if "$BIN_DIR/$BIN_NAME" --help >/dev/null 2>&1; then
+  say "==> Launcher self-check: OK"
+else
+  say "WARNING: launcher self-check failed (try: $BIN_DIR/$BIN_NAME --help)"
+fi
+
+CMD_PATH="$(command -v "$BIN_NAME" 2>/dev/null || true)"
+if [ -n "$CMD_PATH" ] && [ "$CMD_PATH" != "$BIN_DIR/$BIN_NAME" ]; then
+  say ""
+  say "WARNING: another '$BIN_NAME' is first in PATH:"
+  say "  command -v $BIN_NAME -> $CMD_PATH"
+  say "Expected launcher path:"
+  say "  $BIN_DIR/$BIN_NAME"
+  say ""
+  say "Run in current shell:"
+  say "  hash -r"
+  say "  export PATH=\"$BIN_DIR:\$PATH\""
+  say "  type -a $BIN_NAME"
+  say ""
+  say "Or use absolute command directly:"
+  say "  $BIN_DIR/$BIN_NAME geoip-scan ru"
 fi
