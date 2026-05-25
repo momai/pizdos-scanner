@@ -35,6 +35,22 @@ fn fallback_country_for_source(source: &str) -> Option<String> {
     }
 }
 
+fn icmp_unavailable_hint(socket_type: &ConfigSocketType) -> &'static str {
+    match socket_type {
+        ConfigSocketType::DGRAM => {
+            "ICMP через DGRAM сейчас недоступен для текущего пользователя.\n\
+             Для Linux без sudo выполните:\n\
+               sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\"\n\
+             (постоянно: добавьте net.ipv4.ping_group_range = 0 1000 в /etc/sysctl.d/*.conf и примените sysctl --system)\n\
+             Либо используйте socket_type = \"RAW\" (нужны CAP_NET_RAW/root) или ping_type = [\"TCP\"]."
+        }
+        ConfigSocketType::RAW => {
+            "ICMP через RAW недоступен: нужен CAP_NET_RAW или запуск от root.\n\
+             Либо используйте ping_type = [\"TCP\"]."
+        }
+    }
+}
+
 fn expand_to_24(networks: &[String]) -> anyhow::Result<Vec<Ipv4Network>> {
     let mut seen = HashSet::new();
     let mut expanded = Vec::new();
@@ -91,15 +107,10 @@ pub async fn scan_networks(
         )
         .icmp
         {
-            let hint = match socket_type {
-                ConfigSocketType::DGRAM => {
-                    "On Linux allow unprivileged ICMP:\n  sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\"\nSee README section «Локальная сборка → Для ICMP без sudo».\nOr set socket_type = \"RAW\" with CAP_NET_RAW/sudo, or ping_type = [\"TCP\"]."
-                }
-                ConfigSocketType::RAW => {
-                    "RAW ICMP needs CAP_NET_RAW or root.\nSee README section «Локальная сборка».\nOr set ping_type = [\"TCP\"]."
-                }
-            };
-            anyhow::bail!("PING ({socket_type:?}) not available.\n{hint}");
+            anyhow::bail!(
+                "Preflight check failed before scan start: ICMP not available for socket_type={socket_type:?}.\n{}",
+                icmp_unavailable_hint(socket_type)
+            );
         }
     }
 

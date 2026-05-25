@@ -47,6 +47,21 @@ fn tcp_ports_with_443(tcp_ports: &[u16]) -> Vec<u16> {
     ports
 }
 
+fn icmp_unavailable_hint(socket_type: &ConfigSocketType) -> &'static str {
+    match socket_type {
+        ConfigSocketType::DGRAM => {
+            "ICMP через DGRAM сейчас недоступен для текущего пользователя.\n\
+             Для Linux без sudo выполните:\n\
+               sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\"\n\
+             Либо используйте socket_type = \"RAW\" (нужны CAP_NET_RAW/root) или ping_type = [\"TCP\"]."
+        }
+        ConfigSocketType::RAW => {
+            "ICMP через RAW недоступен: нужен CAP_NET_RAW или запуск от root.\n\
+             Либо используйте ping_type = [\"TCP\"]."
+        }
+    }
+}
+
 pub async fn ping_subnet_matrix_rayon(
     base_ip: &str,
     attempts: u8,
@@ -62,8 +77,22 @@ pub async fn ping_subnet_matrix_rayon(
         anyhow::bail!("Wrong IP format");
     }
 
-    if !probe_host("127.0.0.1".parse()?, 1, &socket_type, &vec![ConfigPingType::ICMP], &[], None, None).icmp {
-        anyhow::bail!("PING («{:?}» socket type) not available", &socket_type);
+    if ping_type.contains(&ConfigPingType::ICMP)
+        && !probe_host(
+            "127.0.0.1".parse()?,
+            1,
+            &socket_type,
+            &vec![ConfigPingType::ICMP],
+            &[],
+            None,
+            None,
+        )
+        .icmp
+    {
+        anyhow::bail!(
+            "Preflight check failed before subnet probe: ICMP not available for socket_type={socket_type:?}.\n{}",
+            icmp_unavailable_hint(socket_type)
+        );
     }
 
     let a: u8 = base_octets[0].parse().unwrap_or(0);
