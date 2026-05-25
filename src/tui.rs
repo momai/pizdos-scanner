@@ -79,6 +79,8 @@ pub struct ScanUiConfig {
     pub total_subnets: usize,
     pub resume_count: usize,
     pub endpoint: String,
+    pub operator: Option<String>,
+    pub network_interface: Option<String>,
     pub whitelist: WhitelistInfo,
     pub tcp_ports: Vec<u16>,
     pub socket_type: String,
@@ -156,6 +158,7 @@ struct ScanDashboard {
     endpoint_ok: bool,
     done_message: Option<String>,
     running: bool,
+    stopping: bool,
 }
 
 impl ScanDashboard {
@@ -174,6 +177,7 @@ impl ScanDashboard {
             },
             endpoint_ok: true,
             running: true,
+            stopping: false,
             ..Default::default()
         };
         dash.push_event(EventLevel::Inf, format!("Старт · {total} /24"));
@@ -369,6 +373,8 @@ impl Default for ScanDashboard {
                 total_subnets: 0,
                 resume_count: 0,
                 endpoint: String::new(),
+                operator: None,
+                network_interface: None,
                 whitelist: WhitelistInfo::off(),
                 tcp_ports: vec![],
                 socket_type: String::new(),
@@ -392,6 +398,7 @@ impl Default for ScanDashboard {
             endpoint_ok: true,
             done_message: None,
             running: true,
+            stopping: false,
         }
     }
 }
@@ -501,6 +508,7 @@ impl ScanUi {
         if let Ok(mut dash) = self.state.lock() {
             dash.done_message = Some(message.into());
             dash.running = false;
+            dash.stopping = false;
         }
         let _ = self.shutdown.send(());
         if let Some(handle) = self.draw_thread.take() {
@@ -580,7 +588,7 @@ fn run_loop(
     let _ = ready.send(Ok(()));
 
     loop {
-        if shutdown.try_recv().is_ok() || cancel.load(Ordering::Relaxed) {
+        if shutdown.try_recv().is_ok() {
             break;
         }
 
@@ -591,15 +599,15 @@ fn run_loop(
                     && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
                     cancel.store(true, Ordering::SeqCst);
-                    if let Ok(mut dash) = state.lock() {
-                        dash.push_event(EventLevel::Wrn, "Ctrl+C — остановка…");
-                    }
-                    break;
                 }
             }
         }
 
         if let Ok(mut dash) = state.lock() {
+            if cancel.load(Ordering::Relaxed) && !dash.stopping {
+                dash.stopping = true;
+                dash.push_event(EventLevel::Wrn, "Остановка сканирования, ждите…");
+            }
             dash.tick_current();
             if !dash.running {
                 break;
@@ -698,6 +706,11 @@ fn render_stats(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
     let (bar, _) = subnet_progress_bar(done, total, bar_width.max(20));
     let scanning = dash.current.is_some();
     let status = if scanning { " ▶" } else { "" };
+    let stopping = if dash.stopping {
+        "  ⏳ Остановка сканирования, ждите…"
+    } else {
+        ""
+    };
 
     let progress_line = Line::from(vec![
         Span::styled(format!("{done}/{total}"), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
@@ -706,6 +719,7 @@ fn render_stats(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
         Span::raw(" "),
         Span::styled(format_pct(pct), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::styled(status, Style::default().fg(Color::LightBlue)),
+        Span::styled(stopping, Style::default().fg(Color::Yellow)),
     ]);
 
     let block = Block::default()
@@ -846,6 +860,13 @@ fn render_side(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
         .map(|p| p.to_string())
         .collect::<Vec<_>>()
         .join(", ");
+    let interface_label = dash
+        .config
+        .network_interface
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .map(|v| format!("{v} (forced)"))
+        .unwrap_or_else(|| "auto (system route)".to_string());
 
     let mut lines = vec![
         Line::from(vec![
@@ -877,6 +898,20 @@ fn render_side(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
                 dash.config.ping_types.join("+"),
                 dash.config.socket_type,
             )),
+        ]),
+        Line::from(vec![
+            Span::styled("Operator   ", Style::default().fg(Color::DarkGray)),
+            Span::raw(
+                dash.config
+                    .operator
+                    .as_deref()
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or("—"),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Interface  ", Style::default().fg(Color::DarkGray)),
+            Span::raw(interface_label),
         ]),
         Line::from(vec![
             Span::styled("Сессия     ", Style::default().fg(Color::DarkGray)),

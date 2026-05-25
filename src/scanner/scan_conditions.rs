@@ -193,6 +193,8 @@ pub(crate) fn init_scan_ui(
             total_subnets: all_subnets_len,
             resume_count: completed_count,
             endpoint: endpoint.to_string(),
+            operator: config.operator.clone(),
+            network_interface: config.network_interface.clone(),
             whitelist: whitelist_info(config),
             tcp_ports: tcp_ports.to_vec(),
             socket_type: format!("{socket_type:?}"),
