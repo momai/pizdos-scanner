@@ -57,9 +57,14 @@ git clone https://github.com/momai/pizdos-scanner
 cd pizdos-scanner
 
 docker compose pull
+```
+Для работы через докер укажите `socket_type = "RAW"` в `config.toml`
 
+Запустите:
+```bash
 docker compose run --rm pizdos-scanner geoip-scan ru
 ```
+
 
 Образ: `ghcr.io/momai/pizdos-scanner:latest`
 
