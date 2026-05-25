@@ -177,7 +177,7 @@ if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
     say "==> Created $PROFILE with PATH line"
   fi
 fi
-
+ 
 # NOTE: This affects only current installer process (not parent shell),
 # but helps post-install checks below.
 export PATH="$BIN_DIR:$PATH"
