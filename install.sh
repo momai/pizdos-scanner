@@ -1,191 +1,120 @@
 #!/usr/bin/env sh
-# pizdos-scanner — one-line installer (binary + geoip + config + db + hoster lists)
-#
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh
-#
-# Options (env):
-#   PIZDOS_DIR=~/pizdos-scanner   — рабочая папка (config, geoip, results)
-#   BIN_INSTALL=~/.local/bin      — куда положить wrapper (пусто = без PATH)
-#   SKIP_MMDB=1                   — не качать GeoLite2 mmdb
-#   SKIP_SUBNETS=1                — не качать subnets/*.txt
-#   SKIP_PATH=1                   — не прописывать PATH в shell rc
-
 set -eu
 
-REPO="momai/pizdos-scanner"
-BRANCH="master"
-RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
-RELEASE="https://github.com/${REPO}/releases/latest/download"
-GEOIP_DAT="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-MMDB_CITY="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb"
-MMDB_ASN="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb"
-
-PIZDOS_DIR="${PIZDOS_DIR:-$HOME/pizdos-scanner}"
-BIN_INSTALL="${BIN_INSTALL:-$HOME/.local/bin}"
+REPO_OWNER="momai"
+REPO_NAME="pizdos-scanner"
+REPO_BRANCH="master"
 BIN_NAME="pizdos-scanner"
-PATH_MARKER="# pizdos-scanner installer"
 
-SUBNET_FILES="yandex-cloud.txt vk-cloud.txt regru.txt timeweb.txt selectel.txt all-known-hosters.txt"
+BASE_DIR="${BASE_DIR:-$HOME/.pizdos-scanner}"
+BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+DB_DIR="$BASE_DIR/db"
+SUBNETS_DIR="$BASE_DIR/subnets"
 
-info()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-warn()  { printf '\033[1;33m!!>\033[0m %s\n' "$*"; }
-die()   { printf '\033[1;31mERR:\033[0m %s\n' "$*" >&2; exit 1; }
+say() {
+  printf '%s\n' "$*"
+}
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "нужна команда: $1"
+  if ! command -v "$1" >/dev/null 2>&1; then
+    say "ERROR: required command not found: $1"
+    exit 1
+  fi
 }
 
-expand_home() {
-  p="$1"
-  case "$p" in
-    "~") echo "$HOME" ;;
-    "~/"*) echo "${HOME}/${p#~/}" ;;
-    *) echo "$p" ;;
+need_cmd curl
+need_cmd uname
+need_cmd install
+need_cmd mkdir
+need_cmd chmod
+
+ARCH_RAW="$(uname -m)"
+case "$ARCH_RAW" in
+  x86_64|amd64)
+    ARCH_SUFFIX="x86_64"
+    ;;
+  aarch64|arm64)
+    ARCH_SUFFIX="arm64"
+    ;;
+  *)
+    say "ERROR: unsupported architecture: $ARCH_RAW"
+    say "Supported: x86_64, aarch64/arm64 (Raspberry Pi 64-bit)."
+    exit 1
+    ;;
+esac
+
+BIN_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/latest/download/${BIN_NAME}-linux-${ARCH_SUFFIX}"
+RAW_BASE="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$REPO_BRANCH"
+
+CONFIG_URL="$RAW_BASE/config.toml"
+GEOIP_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+CITY_DB_URL="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb"
+ASN_DB_URL="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb"
+
+say "==> Installing $BIN_NAME ($ARCH_SUFFIX)"
+say "==> Base dir: $BASE_DIR"
+say "==> Bin dir : $BIN_DIR"
+
+mkdir -p "$BASE_DIR" "$DB_DIR" "$SUBNETS_DIR" "$BIN_DIR" "$BASE_DIR/results/state"
+
+TMP_BIN="$BASE_DIR/${BIN_NAME}.tmp"
+curl -fsSL "$BIN_URL" -o "$TMP_BIN"
+install -m 755 "$TMP_BIN" "$BIN_DIR/$BIN_NAME"
+rm -f "$TMP_BIN"
+
+say "==> Downloading config + geo data"
+curl -fsSL "$CONFIG_URL" -o "$BASE_DIR/config.toml"
+curl -fsSL "$GEOIP_URL" -o "$BASE_DIR/geoip.dat"
+
+say "==> Downloading GeoIP mmdb (optional but useful)"
+curl -fsSL "$CITY_DB_URL" -o "$DB_DIR/GeoLite2-City.mmdb"
+curl -fsSL "$ASN_DB_URL" -o "$DB_DIR/GeoLite2-ASN.mmdb"
+
+say "==> Downloading hoster subnet lists"
+for f in \
+  yandex-cloud.txt \
+  vk-cloud.txt \
+  regru.txt \
+  timeweb.txt \
+  selectel.txt \
+  all-known-hosters.txt
+do
+  curl -fsSL "$RAW_BASE/subnets/$f" -o "$SUBNETS_DIR/$f"
+done
+
+if ! echo ":$PATH:" | grep -q ":$BIN_DIR:"; then
+  PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+  SHELL_NAME="${SHELL##*/}"
+  case "$SHELL_NAME" in
+    zsh)
+      PROFILE="$HOME/.zshrc"
+      ;;
+    bash|*)
+      PROFILE="$HOME/.bashrc"
+      ;;
   esac
-}
 
-detect_arch() {
-  machine="$(uname -m)"
-  case "$machine" in
-    x86_64|amd64)  echo "x86_64" ;;
-    aarch64|arm64) echo "arm64" ;;
-    armv7l|armv6l) die "обнаружен ${machine}: release-бинаря нет (нужна Raspberry Pi OS 64-bit / arm64, либо сборка из исходников)" ;;
-    *) die "неподдерживаемая архитектура: $machine (нужен x86_64 или arm64)" ;;
-  esac
-}
-
-download() {
-  url="$1"
-  dest="$2"
-  curl -fsSL --retry 3 --retry-delay 2 -o "$dest" "$url" \
-    || die "не удалось скачать: $url"
-}
-
-ensure_path_in_shell() {
-  bin_dir="$1"
-  path_line="export PATH=\"${bin_dir}:\$PATH\" ${PATH_MARKER}"
-  added=0
-
-  for rc in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
-    [ -f "$rc" ] || continue
-    if grep -Fq "${PATH_MARKER}" "$rc" 2>/dev/null; then
-      continue
+  if [ -f "$PROFILE" ]; then
+    if ! grep -Fq "$BIN_DIR" "$PROFILE"; then
+      printf '\n%s\n' "$PATH_LINE" >> "$PROFILE"
+      say "==> Added PATH line to $PROFILE"
     fi
-    printf '\n%s\n' "$path_line" >> "$rc"
-    info "PATH добавлен в ${rc}"
-    added=1
-  done
-
-  if [ "$added" -eq 0 ]; then
-    if echo ":$PATH:" | grep -q ":${bin_dir}:"; then
-      info "PATH уже содержит ${bin_dir}"
-    else
-      warn "shell rc не найден — добавьте PATH вручную:"
-      echo "  export PATH=\"${bin_dir}:\$PATH\""
-    fi
-  fi
-
-  export PATH="${bin_dir}:$PATH"
-}
-
-write_wrapper() {
-  bin_dir="$1"
-  work_dir="$2"
-  wrapper="${bin_dir}/${BIN_NAME}"
-
-  cat > "$wrapper" <<EOF
-#!/usr/bin/env sh
-# ${PATH_MARKER}
-PIZDOS_DIR="${work_dir}"
-cd "\$PIZDOS_DIR" || {
-  echo "pizdos-scanner: каталог не найден: \$PIZDOS_DIR" >&2
-  exit 1
-}
-exec "\$PIZDOS_DIR/${BIN_NAME}.bin" "\$@"
-EOF
-  chmod +x "$wrapper"
-}
-
-main() {
-  need_cmd curl
-  need_cmd uname
-  need_cmd chmod
-  need_cmd mkdir
-
-  arch="$(detect_arch)"
-  asset="${BIN_NAME}-linux-${arch}"
-  work_dir="$(expand_home "$PIZDOS_DIR")"
-  bin_dir="$(expand_home "$BIN_INSTALL")"
-
-  info "архитектура: ${arch}"
-  info "рабочая папка: ${work_dir}"
-
-  mkdir -p "${work_dir}/db" "${work_dir}/results/state" "${work_dir}/subnets"
-
-  tmp="${work_dir}/.${BIN_NAME}.new"
-  info "скачиваю бинарь: ${asset}"
-  download "${RELEASE}/${asset}" "${tmp}"
-  chmod +x "${tmp}"
-  mv -f "${tmp}" "${work_dir}/${BIN_NAME}.bin"
-
-  if [ -n "${BIN_INSTALL}" ]; then
-    mkdir -p "${bin_dir}"
-    write_wrapper "${bin_dir}" "${work_dir}"
-    info "команда в PATH: ${bin_dir}/${BIN_NAME}"
-
-    if [ "${SKIP_PATH:-0}" != "1" ]; then
-      ensure_path_in_shell "${bin_dir}"
-    else
-      export PATH="${bin_dir}:$PATH"
-      warn "SKIP_PATH=1 — PATH в shell rc не прописан"
-    fi
-  fi
-
-  info "скачиваю geoip.dat"
-  download "${GEOIP_DAT}" "${work_dir}/geoip.dat"
-
-  info "скачиваю config.toml"
-  download "${RAW}/config.toml" "${work_dir}/config.toml"
-
-  if [ "${SKIP_MMDB:-0}" != "1" ]; then
-    info "скачиваю GeoLite2 mmdb (ASN/City)"
-    download "${MMDB_CITY}" "${work_dir}/db/GeoLite2-City.mmdb"
-    download "${MMDB_ASN}" "${work_dir}/db/GeoLite2-ASN.mmdb"
   else
-    warn "SKIP_MMDB=1 — mmdb пропущены"
+    printf '%s\n' "$PATH_LINE" > "$PROFILE"
+    say "==> Created $PROFILE with PATH line"
   fi
+fi
 
-  if [ "${SKIP_SUBNETS:-0}" != "1" ]; then
-    info "скачиваю списки subnets/ (хостеры)"
-    for f in ${SUBNET_FILES}; do
-      download "${RAW}/subnets/${f}" "${work_dir}/subnets/${f}"
-    done
-  else
-    warn "SKIP_SUBNETS=1 — subnets пропущены"
-  fi
-
-  printf '\n'
-  info "готово — можно запускать без ./"
-  echo
-  echo "  pizdos-scanner geoip-list"
-  echo "  pizdos-scanner geoip-scan ru"
-  echo "  pizdos-scanner subnets subnets/yandex-cloud.txt"
-  echo
-  echo "  данные: ${work_dir}"
-  echo
-
-  if [ "${SKIP_PATH:-0}" != "1" ] && [ -n "${BIN_INSTALL}" ]; then
-    warn "если команда не найдена в этом же окне терминала:"
-    echo "  source ~/.bashrc   # или откройте новый терминал"
-    echo
-  fi
-
-  if [ "$(id -u)" -ne 0 ]; then
-    warn "для ICMP без sudo (Linux):"
-    echo '  sudo sysctl -w net.ipv4.ping_group_range="0 1000"'
-    echo "  в ${work_dir}/config.toml: socket_type = \"DGRAM\""
-  fi
-}
-
-main "$@"
+say ""
+say "Done."
+say ""
+say "Use scanner from project data dir:"
+say "  cd \"$BASE_DIR\""
+say "  $BIN_NAME geoip-scan ru"
+say ""
+say "Quick hoster scan:"
+say "  cd \"$BASE_DIR\""
+say "  $BIN_NAME subnets subnets/all-known-hosters.txt"
+say ""
+say "If command is not found in current shell, run:"
+say "  export PATH=\"$BIN_DIR:\$PATH\""
