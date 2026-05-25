@@ -3,7 +3,7 @@ use std::{
     fs::{self, File},
     io::{IsTerminal, Read},
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const CITY_PRIMARY_URL: &str = "https://git.io/GeoLite2-City.mmdb";
@@ -237,6 +237,26 @@ impl Config {
     }
 
     pub fn load(path: &str) -> anyhow::Result<Self> {
+        fn resolve_path(base_dir: &Path, value: &str) -> String {
+            let p = Path::new(value);
+            if p.is_absolute() {
+                p.to_string_lossy().to_string()
+            } else {
+                base_dir.join(p).to_string_lossy().to_string()
+            }
+        }
+
+        let config_path = Path::new(path);
+        let config_dir: PathBuf = if config_path.is_absolute() {
+            config_path
+                .parent()
+                .unwrap_or(Path::new("/"))
+                .to_path_buf()
+        } else {
+            std::env::current_dir()?
+                .join(config_path.parent().unwrap_or(Path::new(".")))
+        };
+
         let mut file = match File::open(path) {
             Ok(file) => file,
             Err(e) => anyhow::bail!("Can't open config file {}: {}", path, e),
@@ -266,6 +286,31 @@ impl Config {
 
         if !config.geoip_asn_db.is_some() {
             config.geoip_asn_db = Some("db/GeoLite2-ASN.mmdb".to_string());
+        }
+        if config.geoip_dat_path.is_none() {
+            config.geoip_dat_path = Some("geoip.dat".to_string());
+        }
+        if config.results_dir.is_none() {
+            config.results_dir = Some("results".to_string());
+        }
+        if config.resume_state_dir.is_none() {
+            config.resume_state_dir = Some("results/state".to_string());
+        }
+
+        if let Some(path) = config.geoip_city_db.clone() {
+            config.geoip_city_db = Some(resolve_path(&config_dir, &path));
+        }
+        if let Some(path) = config.geoip_asn_db.clone() {
+            config.geoip_asn_db = Some(resolve_path(&config_dir, &path));
+        }
+        if let Some(path) = config.geoip_dat_path.clone() {
+            config.geoip_dat_path = Some(resolve_path(&config_dir, &path));
+        }
+        if let Some(path) = config.results_dir.clone() {
+            config.results_dir = Some(resolve_path(&config_dir, &path));
+        }
+        if let Some(path) = config.resume_state_dir.clone() {
+            config.resume_state_dir = Some(resolve_path(&config_dir, &path));
         }
 
         if config.socket_type.is_none() {

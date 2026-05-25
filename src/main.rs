@@ -16,6 +16,7 @@ use clap::{
     Parser,
     Subcommand,
 };
+use std::path::PathBuf;
 use crate::commands::{finalize, net, scan, tcp_scan_file};
 use crate::init::Config;
 
@@ -135,6 +136,24 @@ enum SubnetSubCommand {
     Full
 }
 
+fn resolve_config_path(input: &str) -> (String, bool) {
+    let requested = PathBuf::from(input);
+    if requested.exists() {
+        return (input.to_string(), false);
+    }
+
+    if input == "config.toml" {
+        if let Ok(home) = std::env::var("HOME") {
+            let fallback = PathBuf::from(home).join(".pizdos-scanner").join("config.toml");
+            if fallback.exists() {
+                return (fallback.to_string_lossy().to_string(), true);
+            }
+        }
+    }
+
+    (input.to_string(), false)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
 
@@ -150,8 +169,11 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let config_path = &args.config;
-    let config: Config = Config::load(config_path)?;
+    let (config_path, fallback_used) = resolve_config_path(&args.config);
+    if fallback_used {
+        println!("Using config: {}", config_path);
+    }
+    let config: Config = Config::load(&config_path)?;
 
     if args.update {
         scan::run_update(&config).await?;

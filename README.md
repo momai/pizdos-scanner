@@ -13,33 +13,40 @@ ICMP используется как дополнительный сигнал, 
 
 ### Из бинаря
 
-**One-liner (рекомендуется):**
+Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
+
+One-liner автоустановка (x86_64/arm64, включая Raspberry Pi 64-bit):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh
 ```
 
-Скрипт сам:
-- определит архитектуру (`x86_64` / `arm64`);
-- скачает бинарь, `geoip.dat`, `config.toml`, GeoLite2 mmdb и `subnets/*.txt`;
-- положит данные в `~/pizdos-scanner`;
-- установит wrapper в `~/.local/bin` и **пропишет PATH** в `~/.bashrc` / `~/.profile` / `~/.zshrc`.
-
-После установки команда доступна глобально:
+Альтернатива в формате "скачал и запустил":
 
 ```bash
+curl -O https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh
+sh install.sh
+```
+
+Скрипт сам:
+- определяет архитектуру,
+- скачивает бинарь, `geoip.dat`, `config.toml`, `db/*.mmdb`, `subnets/*.txt`,
+- устанавливает бинарь:
+  - `root` -> `/usr/local/bin`,
+  - обычный пользователь -> `~/.local/bin`,
+- для обычного пользователя добавляет `~/.local/bin` в `PATH` (`~/.bashrc`/`~/.zshrc`),
+- готовит рабочую директорию `~/.pizdos-scanner`.
+
+После установки:
+
+```bash
+cd ~/.pizdos-scanner
 pizdos-scanner geoip-scan ru
 ```
 
-Опции через env:
+---
 
-```bash
-PIZDOS_DIR=~/scan SKIP_MMDB=1 curl -fsSL .../install.sh | sh
-```
-
-Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
-
-Ручная установка (если нужен контроль каждого шага):
+Скачайте бинарь под вашу архитектуру:
 
 ```bash
 # x86_64

@@ -7,7 +7,12 @@ REPO_BRANCH="master"
 BIN_NAME="pizdos-scanner"
 
 BASE_DIR="${BASE_DIR:-$HOME/.pizdos-scanner}"
-BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+if [ "$(id -u)" = "0" ]; then
+  DEFAULT_BIN_DIR="/usr/local/bin"
+else
+  DEFAULT_BIN_DIR="$HOME/.local/bin"
+fi
+BIN_DIR="${BIN_DIR:-$DEFAULT_BIN_DIR}"
 DB_DIR="$BASE_DIR/db"
 SUBNETS_DIR="$BASE_DIR/subnets"
 
@@ -82,8 +87,13 @@ do
   curl -fsSL "$RAW_BASE/subnets/$f" -o "$SUBNETS_DIR/$f"
 done
 
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+PATH_NEEDS_REFRESH=0
 if ! echo ":$PATH:" | grep -q ":$BIN_DIR:"; then
-  PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+  PATH_NEEDS_REFRESH=1
+fi
+
+if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
   SHELL_NAME="${SHELL##*/}"
   case "$SHELL_NAME" in
     zsh)
@@ -116,5 +126,11 @@ say "Quick hoster scan:"
 say "  cd \"$BASE_DIR\""
 say "  $BIN_NAME subnets subnets/all-known-hosters.txt"
 say ""
-say "If command is not found in current shell, run:"
-say "  export PATH=\"$BIN_DIR:\$PATH\""
+if [ "$PATH_NEEDS_REFRESH" = "1" ]; then
+  say "If command is not found in current shell, run:"
+  say "  $PATH_LINE"
+  if [ "$(id -u)" != "0" ]; then
+    say "Or reload shell profile:"
+    say "  source ~/.bashrc   # or: source ~/.zshrc"
+  fi
+fi
