@@ -26,17 +26,28 @@ use crate::geoip::download_dbs;
 use crate::utils::{get_current_ip, write_final_ip_lists_from_jsonl};
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    about = "Scan /24 subnets from geoip.dat, config, or custom subnet lists",
+    after_help = "Examples:
+  pizdos-scanner geoip-list
+  pizdos-scanner geoip-scan ru
+  pizdos-scanner subnets subnets.txt
+  pizdos-scanner subnet 1.1.1.1
+  pizdos-scanner test 1.1.1.1 80 443
+
+Use `pizdos-scanner help <command>` for command details."
+)]
 struct Args {
-    /// Path to custom config file. Default: config.toml
+    /// Path to config file
     #[arg(short, long, default_value = "config.toml")]
     config: String,
 
-    /// Initialize program
+    /// Create initial local folders/files
     #[arg(long)]
     init: bool,
 
-    /// Update db files
+    /// Update GeoLite2 City/ASN databases from config
     #[arg(long)]
     update: bool,
 
@@ -47,45 +58,46 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Ping subnets from config or custom file
+    /// Scan CIDR list from config.toml or a custom file
     Subnets {
-        /// Custom file with subnets
+        /// File with CIDR list, one network per line. If omitted, uses `subnets` from config.toml
         #[arg(value_name = "subnets_file")]
         scan_file: Option<String>,
     },
-    /// Ping /24 subnet
+    /// Scan one /24 subnet by any IP inside it
     Subnet {
-        /// Some ip from /24 subnet
+        /// Any IP from the target /24 subnet
         #[arg(value_name = "ip")]
         ip: String,
-        /// Command to execute
+        /// Optional extra action
         #[command(subcommand)]
         subcommand: Option<SubnetSubCommand>,
     },
-    /// Get current IP (whitelisted mode)
+    /// Print current public IP
     Myip,
-    /// Get info about IP
+    /// Show provider/GeoIP/PTR info for an IP
     Info {
-        /// IP or domain to get info
+        /// IP to inspect
         #[arg(value_name = "ip")]
         ip: String,
     },
+    /// Test TCP reachability for one IP/domain and selected ports
     Test {
-        /// IP or domain to get info
+        /// IP or domain to test
         #[arg(value_name = "ip")]
         ip: Option<String>,
         /// Ports to test
         #[arg(value_name = "ports")]
         ports: Option<Vec<u16>>,
-        /// SNI host for curl-like HTTPS probe
+        /// SNI host for TLS probe
         #[arg(long)]
         sni: Option<String>,
     },
     /// List codes available in Xray/V2Ray geoip.dat
     GeoipList,
-    /// Scan IPv4 CIDR lists from Xray/V2Ray geoip.dat
+    /// Scan IPv4 CIDR lists from Xray/V2Ray geoip.dat codes
     GeoipScan {
-        /// Override geoip codes from config
+        /// GeoIP codes to scan. If omitted, uses `geoip_codes` from config.toml
         #[arg(value_name = "codes")]
         codes: Vec<String>,
     },
@@ -99,7 +111,7 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum SubnetSubCommand {
-    /// Add getting info about IP
+    /// Also enrich the first alive IP with provider/GeoIP/PTR info
     Full
 }
 

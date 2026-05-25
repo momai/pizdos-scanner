@@ -1,7 +1,10 @@
 # Что сканировать. geoip-scan берет CIDR из Xray/V2Ray geoip.dat.
 geoip_dat_path = "geoip.dat"
 geoip_codes = ["ru"]
-subnets = []
+subnets = [
+  "1.2.3.0/24",
+  "5.6.0.0/16"
+]
 
 # Консоль: plain (строки, надёжно), tui (дашборд), auto (TUI только с PIZDOS_TUI=1)
 console = "tui"
@@ -17,7 +20,7 @@ ping_type = [
     "ICMP",
     "TCP"
 ]
-tcp_ports = [80, 443]
+tcp_ports = [443]
 
 # Для HTTPS/TLS TCP-проверки с SNI. Если включить, tcp_ports должны быть TLS-портами.
 #tcp_sni_host = "example.com"

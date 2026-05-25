@@ -68,9 +68,13 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 ### Для бинаря
 
 ```bash
+./pizdos-scanner help                              # список всех команд
 ./pizdos-scanner geoip-list                         # показать группы из geoip.dat
 ./pizdos-scanner geoip-scan ru                      # скан одной группы
 ./pizdos-scanner geoip-scan cn private telegram     # скан нескольких групп
+./pizdos-scanner subnets                            # скан CIDR из config.toml
+./pizdos-scanner subnets subnets.txt                # скан CIDR из файла
+./pizdos-scanner subnet 1.1.1.1                     # скан одной /24 по любому IP внутри неё
 ./pizdos-scanner finalize results/<scan>.jsonl      # пересобрать *_alive.txt и *_rejected.txt
 ./pizdos-scanner test 1.1.1.1 80 443                # TCP-проверка IP/портов
 ./pizdos-scanner test 1.1.1.1 443 --sni example.com # TCP/TLS-проверка с SNI
@@ -81,10 +85,13 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 ### Для Docker
 
 ```bash
+docker compose run --rm --no-build pizdos-scanner help
 docker compose run --rm --no-build pizdos-scanner geoip-list
 docker compose run --rm --no-build pizdos-scanner geoip-scan ru
 docker compose run --rm --no-build pizdos-scanner geoip-scan cn private
 docker compose run --rm --no-build pizdos-scanner geoip-scan telegram
+docker compose run --rm --no-build pizdos-scanner subnets subnets.txt
+docker compose run --rm --no-build pizdos-scanner subnet 1.1.1.1
 docker compose run --rm --no-build pizdos-scanner finalize results/<scan>.jsonl
 docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 80 443
 docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 443 --sni example.com
