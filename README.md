@@ -28,7 +28,6 @@ pizdos-scanner geoip-scan ru
 ```
 
 ### Ручная установка
-:
 
 ```bash
 # x86_64
