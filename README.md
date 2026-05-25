@@ -11,12 +11,14 @@ ICMP используется как дополнительный сигнал, 
 
 Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
 
-Скачайте бинарь и файлы geoip. 
+Скачайте конфиг, исполняемые файл и geoip файл. 
 ```bash
 curl -L -o pizdos-scanner \
   https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-x86_64
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat  
+curl -L -o config.toml \
+  https://raw.githubusercontent.com/momai/pizdos-scanner/main/config.toml
 chmod +x pizdos-scanner
 ```
 
@@ -44,13 +46,6 @@ git clone https://github.com/momai/pizdos-scanner
 cd pizdos-scanner
 
 docker compose pull
-mkdir -p db
-curl -L -o geoip.dat \
-  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
-curl -L -o db/GeoLite2-City.mmdb \
-  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
-curl -L -o db/GeoLite2-ASN.mmdb \
-  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
 
 docker compose run --rm pizdos-scanner geoip-scan ru
 ```
@@ -62,22 +57,13 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 ### Для бинаря
 
 ```bash
-./pizdos-scanner geoip-list
-./pizdos-scanner geoip-scan ru
-./pizdos-scanner geoip-scan cn private
-./pizdos-scanner geoip-scan telegram
-./pizdos-scanner finalize results/<scan>.jsonl
-./pizdos-scanner test 1.1.1.1 80 443
-./pizdos-scanner test 1.1.1.1 443 --sni example.com
+./pizdos-scanner geoip-list                         # показать группы из geoip.dat
+./pizdos-scanner geoip-scan ru                      # скан одной группы
+./pizdos-scanner geoip-scan cn private telegram     # скан нескольких групп
+./pizdos-scanner finalize results/<scan>.jsonl      # пересобрать *_alive.txt и *_rejected.txt
+./pizdos-scanner test 1.1.1.1 80 443                # TCP-проверка IP/портов
+./pizdos-scanner test 1.1.1.1 443 --sni example.com # TCP/TLS-проверка с SNI
 ```
-
-- `geoip-list` — показывает доступные коды групп из `geoip.dat`.
-- `geoip-scan ru` — сканирует подсети из группы `ru`.
-- `geoip-scan cn private` — сканирует сразу несколько групп.
-- `geoip-scan telegram` — сканирует группу `telegram`.
-- `finalize results/<scan>.jsonl` — пересобирает текстовые списки (`*_alive.txt`, `*_rejected.txt`) из JSONL.
-- `test 1.1.1.1 80 443` — точечная TCP-проверка IP/портов.
-- `test 1.1.1.1 443 --sni example.com` — точечная TCP/TLS-проверка с SNI.
 
 Если бинарь установлен в `PATH`, просто используйте `pizdos-scanner ...`.
 
