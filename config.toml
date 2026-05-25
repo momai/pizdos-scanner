@@ -74,16 +74,17 @@ stop_every_times = 0
 # - ChangeIp: вызвать change_ip_url
 stop_action = "Prompt"
 
+# Пауза в секундах:
+# - после endpoint_failure_action="ChangeIp"
+# - при stop_action="Delay"
+delay_seconds = 5
+
 # URL для ротации IP (локальный API роутера/модема/VPN-скрипта).
 # Используется и для аварийного, и для планового ChangeIp:
 # - endpoint_failure_action = "ChangeIp"
 # - stop_action = "ChangeIp"
 change_ip_url = "http://127.0.0.1/changeIp"
 
-# Пауза в секундах:
-# - после endpoint_failure_action="ChangeIp"
-# - при stop_action="Delay"
-delay_seconds = 5
 
 # Остановить скан, когда указанный ресурс стал TCP-достижим.
 # Проверка идёт до и после каждой /24. Если сработало после скана,
