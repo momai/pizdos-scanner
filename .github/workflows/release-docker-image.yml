@@ -64,8 +64,16 @@ jobs:
         include:
           - runner: ubuntu-22.04
             asset_name: pizdos-scanner-linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            verify_exec: true
           - runner: ubuntu-22.04-arm
             asset_name: pizdos-scanner-linux-arm64
+            target: aarch64-unknown-linux-gnu
+            verify_exec: true
+          - runner: ubuntu-22.04
+            asset_name: pizdos-scanner-linux-armv7
+            target: armv7-unknown-linux-gnueabihf
+            verify_exec: false
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -75,21 +83,64 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install armv7 toolchain
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
+
       - name: Build binary
-        run: cargo build --release --locked
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Prepare release assets
         run: |
           mkdir -p dist
-          cp target/release/pizdos-scanner "dist/${{ matrix.asset_name }}"
+          cp "target/${{ matrix.target }}/release/pizdos-scanner" "dist/${{ matrix.asset_name }}"
           chmod +x "dist/${{ matrix.asset_name }}"
           tar -C dist -czf "dist/${{ matrix.asset_name }}.tar.gz" "${{ matrix.asset_name }}"
           sha256sum "dist/${{ matrix.asset_name }}" "dist/${{ matrix.asset_name }}.tar.gz" > "dist/${{ matrix.asset_name }}.sha256"
 
+      - name: Prepare armv7 smoke inputs
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          curl -fsSL https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -o dist/geoip.dat
+          cat > dist/ci-config.toml <<'EOF'
+          geoip_dat_path = "geoip.dat"
+          subnets = []
+          EOF
+
       - name: Verify binary
         run: |
           file "dist/${{ matrix.asset_name }}"
-          "./dist/${{ matrix.asset_name }}" --version
+          if [ "${{ matrix.verify_exec }}" = "true" ]; then
+            "./dist/${{ matrix.asset_name }}" --version
+          else
+            echo "Skip runtime execute check for cross-built target: ${{ matrix.target }}"
+          fi
+
+      - name: Set up QEMU for armv7 smoke
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Smoke test armv7 in QEMU container
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v "$PWD/dist:/dist:ro" \
+            arm32v7/debian:bookworm \
+            sh -ec '
+              apt-get update
+              apt-get install -y --no-install-recommends libssl3 ca-certificates
+              /dist/pizdos-scanner-linux-armv7 --version
+              cd /dist
+              /dist/pizdos-scanner-linux-armv7 --config /dist/ci-config.toml geoip-list
+            '
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -122,6 +173,9 @@ jobs:
             dist/pizdos-scanner-linux-arm64
             dist/pizdos-scanner-linux-arm64.tar.gz
             dist/pizdos-scanner-linux-arm64.sha256
+            dist/pizdos-scanner-linux-armv7
+            dist/pizdos-scanner-linux-armv7.tar.gz
+            dist/pizdos-scanner-linux-armv7.sha256
           body: |
             ## Artifacts
 
@@ -129,14 +183,16 @@ jobs:
             - Binaries:
               - `pizdos-scanner-linux-x86_64` (+ `.tar.gz`, `.sha256`)
               - `pizdos-scanner-linux-arm64` (+ `.tar.gz`, `.sha256`)
+              - `pizdos-scanner-linux-armv7` (+ `.tar.gz`, `.sha256`)
             - Binary builders:
               - `ubuntu-22.04` for x86_64 (better glibc compatibility)
               - `ubuntu-22.04-arm` for arm64 (native build/verify, better glibc compatibility)
+              - `ubuntu-22.04` + cross-compiler for armv7 (Raspberry Pi OS 32-bit)
 
             ## Run binary
 
             ```bash
-            chmod +x pizdos-scanner-linux-x86_64  # or pizdos-scanner-linux-arm64
+            chmod +x pizdos-scanner-linux-x86_64  # or arm64 / armv7
             ./pizdos-scanner-linux-x86_64 geoip-list
             ```
 
@@ -145,4 +201,5 @@ jobs:
             ```bash
             sha256sum -c pizdos-scanner-linux-x86_64.sha256
             sha256sum -c pizdos-scanner-linux-arm64.sha256
+            sha256sum -c pizdos-scanner-linux-armv7.sha256
             ```

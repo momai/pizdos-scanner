@@ -46,9 +46,12 @@ case "$ARCH_RAW" in
   aarch64|arm64)
     ARCH_SUFFIX="arm64"
     ;;
+  armv7l|armv7)
+    ARCH_SUFFIX="armv7"
+    ;;
   *)
     say "ERROR: unsupported architecture: $ARCH_RAW"
-    say "Supported: x86_64, aarch64/arm64 (Raspberry Pi 64-bit)."
+    say "Supported: x86_64, aarch64/arm64 (Raspberry Pi 64-bit), armv7 (Raspberry Pi OS 32-bit)."
     exit 1
     ;;
 esac

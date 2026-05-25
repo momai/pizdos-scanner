@@ -11,7 +11,7 @@ ICMP используется как дополнительный сигнал, 
 
 ## Быстрый старт
 
-### One-liner автоустановка (x86_64/arm64, включая Raspberry Pi 64-bit):
+### One-liner автоустановка (x86_64/arm64/armv7, включая Raspberry Pi 32-bit и 64-bit):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh
@@ -38,6 +38,11 @@ curl -L -o pizdos-scanner \
 # arm64 (Raspberry Pi 64-bit) 
  curl -L -o pizdos-scanner \
   https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-arm64
+```
+```bash
+# armv7 (Raspberry Pi OS 32-bit)
+curl -L -o pizdos-scanner \
+  https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-armv7
 ```
 
 Скачайте геофайл и конфиг
