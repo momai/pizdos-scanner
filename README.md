@@ -12,8 +12,6 @@ ICMP используется как дополнительный сигнал, 
 Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
 
 Скачайте бинарь под вашу архитектуру:
-- `x86_64`: `pizdos-scanner-linux-x86_64`
-- `arm64` (Raspberry Pi 64-bit): `pizdos-scanner-linux-arm64`
 
 ```bash
 # x86_64
