@@ -28,7 +28,7 @@ pizdos-scanner geoip-scan ru
 ```
 
 ### Ручная установка
-
+Скачайте собранный бинарный файл
 ```bash
 # x86_64
 curl -L -o pizdos-scanner \
