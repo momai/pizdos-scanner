@@ -33,7 +33,7 @@ curl -L -o pizdos-scanner \
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 curl -L -o config.toml \
-  https://raw.githubusercontent.com/momai/pizdos-scanner/main/config.toml
+  https://raw.githubusercontent.com/momai/pizdos-scanner/master/config.toml
 chmod +x pizdos-scanner
 ```
 

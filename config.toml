@@ -29,7 +29,7 @@ subnet_parallelism = 1
 
 # Опционально: ручной лимит одновременных host-probe (ICMP/TCP).
 # Если закомментировано — автоподбор от subnet_parallelism.
-# host_probe_parallelism = 500
+# host_probe_parallelism = 900
 
 
 # Тюнинг probe.
