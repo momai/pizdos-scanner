@@ -56,9 +56,17 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-binary:
-    name: Build release binary
+    name: Build release binaries
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            asset_name: pizdos-scanner-linux-x86_64
+          - runner: ubuntu-22.04-arm
+            asset_name: pizdos-scanner-linux-arm64
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout
@@ -73,15 +81,20 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p dist
-          cp target/release/pizdos-scanner dist/pizdos-scanner-linux-x86_64
-          chmod +x dist/pizdos-scanner-linux-x86_64
-          tar -C dist -czf dist/pizdos-scanner-linux-x86_64.tar.gz pizdos-scanner-linux-x86_64
-          sha256sum dist/pizdos-scanner-linux-x86_64 dist/pizdos-scanner-linux-x86_64.tar.gz > dist/sha256sums.txt
+          cp target/release/pizdos-scanner "dist/${{ matrix.asset_name }}"
+          chmod +x "dist/${{ matrix.asset_name }}"
+          tar -C dist -czf "dist/${{ matrix.asset_name }}.tar.gz" "${{ matrix.asset_name }}"
+          sha256sum "dist/${{ matrix.asset_name }}" "dist/${{ matrix.asset_name }}.tar.gz" > "dist/${{ matrix.asset_name }}.sha256"
+
+      - name: Verify binary
+        run: |
+          file "dist/${{ matrix.asset_name }}"
+          "./dist/${{ matrix.asset_name }}" --version
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-binary
+          name: release-binary-${{ matrix.asset_name }}
           path: dist/*
 
   publish-release:
@@ -94,7 +107,8 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-binary
+          pattern: release-binary-*
+          merge-multiple: true
           path: dist
 
       - name: Create GitHub release
@@ -104,23 +118,31 @@ jobs:
           files: |
             dist/pizdos-scanner-linux-x86_64
             dist/pizdos-scanner-linux-x86_64.tar.gz
-            dist/sha256sums.txt
+            dist/pizdos-scanner-linux-x86_64.sha256
+            dist/pizdos-scanner-linux-arm64
+            dist/pizdos-scanner-linux-arm64.tar.gz
+            dist/pizdos-scanner-linux-arm64.sha256
           body: |
             ## Artifacts
 
             - Docker: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
-            - Binary: `pizdos-scanner-linux-x86_64` and `.tar.gz` attached to this release.
-            - Binary builder base: `ubuntu-22.04` (improves glibc compatibility).
+            - Binaries:
+              - `pizdos-scanner-linux-x86_64` (+ `.tar.gz`, `.sha256`)
+              - `pizdos-scanner-linux-arm64` (+ `.tar.gz`, `.sha256`)
+            - Binary builders:
+              - `ubuntu-22.04` for x86_64 (better glibc compatibility)
+              - `ubuntu-22.04-arm` for arm64 (native build/verify, better glibc compatibility)
 
             ## Run binary
 
             ```bash
-            chmod +x pizdos-scanner-linux-x86_64
+            chmod +x pizdos-scanner-linux-x86_64  # or pizdos-scanner-linux-arm64
             ./pizdos-scanner-linux-x86_64 geoip-list
             ```
 
             ## Verify checksums
 
             ```bash
-            sha256sum -c sha256sums.txt
+            sha256sum -c pizdos-scanner-linux-x86_64.sha256
+            sha256sum -c pizdos-scanner-linux-arm64.sha256
             ```

@@ -13,8 +13,19 @@ Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github
 
 Скачайте конфиг, исполняемые файл и geoip файл. 
 ```bash
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) ASSET="pizdos-scanner-linux-x86_64" ;;
+  aarch64|arm64) ASSET="pizdos-scanner-linux-arm64" ;;
+  *)
+    echo "Unsupported architecture: $ARCH"
+    echo "Use Docker or build from sources"
+    exit 1
+    ;;
+esac
+
 curl -L -o pizdos-scanner \
-  https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-x86_64
+  "https://github.com/momai/pizdos-scanner/releases/latest/download/${ASSET}"
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat  
 curl -L -o config.toml \
