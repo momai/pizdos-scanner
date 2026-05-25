@@ -8,6 +8,10 @@ use std::{
     io::Read,
     net::{IpAddr, Ipv4Addr, ToSocketAddrs},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
     time::Duration,
 };
 use tokio::time::{sleep, Instant};
@@ -31,7 +35,9 @@ use crate::utils::{
     SubnetProbeStats,
 };
 use crate::tcp_ping::TcpProbeStatus;
+use crate::tui::{EventLevel, ScanUi, ScanUiConfig, WhitelistInfo};
 use crate::init::{ConfigEndpointFailureAction, ConfigStopAction};
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default)]
@@ -325,7 +331,12 @@ fn ping_endpoint(
     ping_host_icmp_only(ip, attempts, socket_type, network_interface)
 }
 
-fn resolve_stop_target(target: &str, port: u16) -> anyhow::Result<IpAddr> {
+fn resolve_stop_target_with_timeout(
+    target: &str,
+    port: u16,
+    timeout: Duration,
+    cancel: Option<&AtomicBool>,
+) -> anyhow::Result<IpAddr> {
     if let Ok(ip) = target.parse::<IpAddr>() {
         return Ok(ip);
     }
@@ -335,14 +346,38 @@ fn resolve_stop_target(target: &str, port: u16) -> anyhow::Result<IpAddr> {
     } else {
         format!("{target}:{port}")
     };
-    let addrs: Vec<_> = lookup
-        .to_socket_addrs()
-        .with_context(|| format!("Failed to resolve stop_on_available target {target}"))?
-        .collect();
-    addrs
-        .first()
-        .map(|addr| addr.ip())
-        .context(format!("No addresses resolved for stop_on_available target {target}"))
+
+    let target_label = target.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let result = lookup
+            .to_socket_addrs()
+            .with_context(|| format!("Failed to resolve stop_on_available target {target_label}"))
+            .and_then(|addrs| {
+                addrs
+                    .map(|addr| addr.ip())
+                    .next()
+                    .context(format!("No addresses resolved for stop_on_available target {target_label}"))
+            });
+        let _ = tx.send(result);
+    });
+
+    let started = Instant::now();
+    loop {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            anyhow::bail!("whitelist probe cancelled");
+        }
+        if started.elapsed() >= timeout {
+            anyhow::bail!("DNS timeout for stop_on_available target {target}");
+        }
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("DNS resolver thread exited unexpectedly for {target}");
+            }
+        }
+    }
 }
 
 struct StopTargetChecker {
@@ -364,25 +399,35 @@ impl StopTargetChecker {
         stop_on_available_label(&self.stop)
     }
 
-    fn is_available(&mut self, network_interface: Option<&str>) -> bool {
+    fn is_available(
+        &mut self,
+        network_interface: Option<&str>,
+        cancel: Option<&AtomicBool>,
+    ) -> (bool, Option<String>) {
         if self.resolved_ip.is_none() {
-            match resolve_stop_target(&self.stop.target, self.stop.port) {
+            match resolve_stop_target_with_timeout(
+                &self.stop.target,
+                self.stop.port,
+                Duration::from_secs(2),
+                cancel,
+            ) {
                 Ok(ip) => self.resolved_ip = Some(ip),
                 Err(error) => {
                     if !self.resolve_error_logged {
-                        eprintln!(
-                            "{}",
-                            format!(
-                                "whitelist probe: cannot resolve {} ({error})",
-                                self.stop.target
-                            )
-                            .yellow()
-                        );
                         self.resolve_error_logged = true;
+                        let msg = format!(
+                            "whitelist probe: cannot resolve {} ({error})",
+                            self.stop.target
+                        );
+                        return (false, Some(msg));
                     }
-                    return false;
+                    return (false, None);
                 }
             }
+        }
+
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return (false, Some("whitelist probe cancelled".to_string()));
         }
 
         let ip = self.resolved_ip.expect("resolved above");
@@ -393,7 +438,7 @@ impl StopTargetChecker {
             network_interface,
             Duration::from_millis(800),
         );
-        status.is_alive()
+        (status.is_alive(), None)
     }
 }
 
@@ -405,34 +450,64 @@ fn stop_on_available_label(stop: &StopOnAvailableConfig) -> String {
     }
 }
 
+fn whitelist_info(config: &Config) -> WhitelistInfo {
+    match &config.stop_on_available {
+        Some(stop) if stop.is_active() => WhitelistInfo {
+            label: stop_on_available_label(stop),
+            enabled: true,
+            check_before: stop.check_before_subnet,
+            check_after: stop.check_after_subnet,
+        },
+        Some(stop) if stop.enabled => WhitelistInfo {
+            label: "target пуст".to_string(),
+            enabled: false,
+            check_before: stop.check_before_subnet,
+            check_after: stop.check_after_subnet,
+        },
+        _ => WhitelistInfo::off(),
+    }
+}
+
+fn count_rejected_hosts(stats: &SubnetProbeStats) -> usize {
+    stats
+        .hosts
+        .iter()
+        .filter(|host| !host.tcp_rejected_ports.is_empty())
+        .count()
+}
+
+fn ping_types_label(ping_type: &[ConfigPingType]) -> Vec<String> {
+    ping_type
+        .iter()
+        .map(|p| match p {
+            ConfigPingType::ICMP => "ICMP".to_string(),
+            ConfigPingType::TCP => "TCP".to_string(),
+        })
+        .collect()
+}
+
 fn graceful_stop_on_available(
     state_path: &Path,
     state: &mut ScanState,
     stop: &StopOnAvailableConfig,
     subnet: Option<&str>,
+    ui: Option<&ScanUi>,
 ) -> anyhow::Result<()> {
     let label = stop_on_available_label(stop);
     state.stopped_reason = Some(format!("stop_on_available:{label}"));
     state.finished = false;
     save_state(state_path, state)?;
 
-    match subnet {
-        Some(subnet) => {
-            println!(
-                "{}",
-                format!(
-                    "whitelist stop: {} available, discarded {}",
-                    label, subnet
-                )
-                .bright_yellow()
-            );
-        }
-        None => {
-            println!(
-                "{}",
-                format!("whitelist stop: {} available", label).bright_yellow()
-            );
-        }
+    let msg = match subnet {
+        Some(subnet) => format!("whitelist stop: {label} available, discarded {subnet}"),
+        None => format!("whitelist stop: {label} available"),
+    };
+
+    if let Some(ui) = ui {
+        ui.log(EventLevel::Wrn, msg);
+        ui.set_whitelist_status("доступен — стоп");
+    } else {
+        println!("{}", msg.bright_yellow());
     }
 
     Ok(())
@@ -747,10 +822,7 @@ pub async fn scan_networks(
     let job_id = build_job_id(config, scan_name, &networks);
     let state_path = state_path(config, &job_id);
     let mut state = match (config.resume_enabled(), load_state(&state_path)?) {
-        (true, Some(state)) if !state.finished => {
-            println!("{}", format!("resume {}", state_path.display()).dimmed());
-            state
-        }
+        (true, Some(state)) if !state.finished => state,
         _ => create_state(config, scan_name, job_id),
     };
     save_state(&state_path, &mut state)?;
@@ -770,40 +842,119 @@ pub async fn scan_networks(
         .cloned()
         .map(StopTargetChecker::new);
 
-    let mut scan_meta = vec![
-        format!("{scan_name}"),
-        format!("{} /24", all_subnets.len()),
-    ];
-    if !completed_subnets.is_empty() {
-        scan_meta.push(format!("resume {}", completed_subnets.len()));
-    }
-    if let Some(checker) = &stop_checker {
-        scan_meta.push(format!("whitelist {}", checker.label()));
-    }
-    if is_task {
-        scan_meta.push(format!("endpoint {endpoint}"));
-    }
-    println!("{}", scan_meta.join(" · ").cyan());
+    let whitelist_label = stop_checker.as_ref().map(|c| c.label());
+    let use_tui = config.use_tui();
+    let socket_type = config
+        .socket_type
+        .as_ref()
+        .context("socket_type is required")?;
+    let mut ui: Option<ScanUi> = if use_tui {
+        let ui_config = ScanUiConfig {
+            scan_name: scan_name.to_string(),
+            total_subnets: all_subnets.len(),
+            resume_count: completed_subnets.len(),
+            endpoint: endpoint.clone(),
+            whitelist: whitelist_info(config),
+            tcp_ports: tcp_ports.clone(),
+            socket_type: format!("{socket_type:?}"),
+            ping_types: ping_types_label(&config.ping_type),
+            result_jsonl: state.result_jsonl.clone(),
+            last_stop: state.stopped_reason.clone(),
+        };
+        match ScanUi::try_start(ui_config) {
+            Ok(ui) => Some(ui),
+            Err(e) => {
+                eprintln!("TUI unavailable ({e}), falling back to plain output");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
-    if let Some(reason) = &state.stopped_reason {
-        println!("{}", format!("last stop: {reason}").dimmed());
+    if ui.is_none() {
+        let mut scan_meta = vec![
+            format!("{scan_name}"),
+            format!("{} /24", all_subnets.len()),
+        ];
+        if !completed_subnets.is_empty() {
+            scan_meta.push(format!("resume {}", completed_subnets.len()));
+        }
+        if let Some(label) = &whitelist_label {
+            scan_meta.push(format!("whitelist {label}"));
+        } else {
+            let wl = whitelist_info(config);
+            if !wl.enabled {
+                scan_meta.push("whitelist выкл".to_string());
+            }
+        }
+        scan_meta.push(format!("endpoint {endpoint}"));
+        println!("{}", scan_meta.join(" · ").cyan());
+
+        if let Some(reason) = &state.stopped_reason {
+            println!("{}", format!("last stop: {reason}").dimmed());
+        }
     }
 
     let mut scanned_this_run = 0usize;
+    let mut interrupted = false;
+    let scan_progress = ScanProgress::new(ui.is_none(), all_subnets.len(), completed_subnets.len());
 
     for (index, subnet24) in all_subnets.iter().enumerate() {
+        if ui.as_ref().is_some_and(|u| u.cancelled()) {
+            interrupted = true;
+            break;
+        }
+
         let subnet_string = subnet24.to_string();
-        let string_part = format!("{}/{}", index + 1, all_subnets.len());
+        let _string_part = format!("{}/{}", index + 1, all_subnets.len());
 
         if completed_subnets.contains(&subnet_string) {
             continue;
         }
 
         if let Some(checker) = &mut stop_checker {
-            if checker.stop.check_before_subnet && checker.is_available(network_interface) {
-                graceful_stop_on_available(&state_path, &mut state, &checker.stop, None)?;
+            if ui.as_ref().is_some_and(|u| u.cancelled()) {
+                interrupted = true;
+                break;
+            }
+            if let Some(ui) = &ui {
+                ui.set_whitelist_status("проверка…");
+                ui.log(EventLevel::Inf, format!("Whitelist probe {}", checker.label()));
+            }
+            let cancel = ui.as_ref().map(|u| u.cancel_flag());
+            let (available, warn) = checker.is_available(network_interface, cancel);
+            if let Some(warn) = &warn {
+                if warn.contains("cancelled") {
+                    interrupted = true;
+                    break;
+                }
+                if let Some(ui) = &ui {
+                    ui.log(EventLevel::Wrn, warn.clone());
+                } else {
+                    eprintln!("{}", warn.yellow());
+                }
+            }
+            if checker.stop.check_before_subnet && available {
+                graceful_stop_on_available(&state_path, &mut state, &checker.stop, None, ui.as_ref())?;
+                if let Some(ui) = ui.take() {
+                    ui.finish(format!(
+                        "stopped: whitelist · {} /24 this run",
+                        scanned_this_run
+                    ));
+                }
                 return Ok(());
             }
+            if let Some(ui) = &ui {
+                ui.set_whitelist_status(if available { "доступен" } else { "недоступен" });
+            }
+        }
+
+        let done_before = completed_subnets.len() + scanned_this_run;
+        if let Some(ui) = &ui {
+            ui.set_scanning(index + 1, &subnet_string);
+        } else {
+            scan_progress.set_position(done_before, &subnet_string);
         }
 
         let iteration_start = Instant::now();
@@ -822,41 +973,69 @@ pub async fn scan_networks(
                 let iteration_time = iteration_start.elapsed();
                 let stats = &result.2;
                 let elapsed_sec = iteration_time.as_secs_f64();
+                let rejected = count_rejected_hosts(stats);
 
                 if let Some(checker) = &mut stop_checker {
-                    if checker.stop.check_after_subnet && checker.is_available(network_interface) {
+                    if ui.as_ref().is_some_and(|u| u.cancelled()) {
+                        interrupted = true;
+                        break;
+                    }
+                    if let Some(ui) = &ui {
+                        ui.set_whitelist_status("проверка…");
+                    }
+                    let cancel = ui.as_ref().map(|u| u.cancel_flag());
+                    let (available, warn) = checker.is_available(network_interface, cancel);
+                    if let Some(warn) = &warn {
+                        if warn.contains("cancelled") {
+                            interrupted = true;
+                            break;
+                        }
+                        if let Some(ui) = &ui {
+                            ui.log(EventLevel::Wrn, warn.clone());
+                        } else {
+                            eprintln!("{}", warn.yellow());
+                        }
+                    }
+                    if checker.stop.check_after_subnet && available {
                         graceful_stop_on_available(
                             &state_path,
                             &mut state,
                             &checker.stop,
                             Some(&subnet_string),
+                            ui.as_ref(),
                         )?;
+                        if let Some(ui) = ui.take() {
+                            ui.finish(format!(
+                                "stopped: whitelist · {} /24 this run",
+                                scanned_this_run
+                            ));
+                        }
                         return Ok(());
+                    }
+                    if let Some(ui) = &ui {
+                        ui.set_whitelist_status(if available { "доступен" } else { "недоступен" });
                     }
                 }
 
-                let line = if stats.tcp_alive > 0 || stats.icmp_alive > 0 {
-                    format!(
-                        "[{:>7}] {:<18} icmp {:>3}  tcp {:>3}  {:.1}s",
-                        string_part,
-                        subnet_string,
+                if let Some(ui) = &ui {
+                    ui.complete_subnet(
+                        index + 1,
+                        &subnet_string,
                         stats.icmp_alive,
                         stats.tcp_alive,
+                        rejected,
                         elapsed_sec,
-                    )
-                } else {
-                    format!(
-                        "[{:>7}] {:<18} dead           {:.1}s",
-                        string_part, subnet_string, elapsed_sec,
-                    )
-                };
-
-                if stats.tcp_alive > 0 {
-                    println!("{}", line.green());
-                } else if stats.icmp_alive > 0 {
-                    println!("{}", line.yellow());
-                } else {
-                    println!("{}", line.dimmed());
+                    );
+                } else if scan_progress.is_active() {
+                    let summary = if stats.tcp_alive > 0 || stats.icmp_alive > 0 {
+                        format!(
+                            "{} icmp {} tcp {} {:.1}s",
+                            subnet_string, stats.icmp_alive, stats.tcp_alive, elapsed_sec
+                        )
+                    } else {
+                        format!("{subnet_string} dead {elapsed_sec:.1}s")
+                    };
+                    scan_progress.set_message(summary);
                 }
 
                 append_result_to_csv(&result, &state.result_csv)?;
@@ -866,9 +1045,14 @@ pub async fn scan_networks(
                 completed_subnets.insert(subnet_string.clone());
                 failed_subnets.remove(&subnet_string);
                 scanned_this_run += 1;
+                scan_progress.complete_subnet();
             }
             Err(e) => {
-                eprintln!("{}", format!("  error {subnet_string}: {e}").red());
+                if let Some(ui) = &ui {
+                    ui.subnet_error(index + 1, &subnet_string, &e.to_string());
+                } else {
+                    eprintln!("{}", format!("  error {subnet_string}: {e}").red());
+                }
                 failed_subnets.insert(subnet_string.clone());
             }
         }
@@ -888,16 +1072,38 @@ pub async fn scan_networks(
 
             if cnt + 1 < max_loop {
                 let delay = if cnt < 4 { 5000 + cnt * 5000 } else { 60000 };
-                eprintln!("⚠️ Endpoint [{}] unavailable, retrying [{}sec] {}/{}", endpoint, delay / 1000, cnt + 1, max_loop);
+                let retry_msg = format!(
+                    "Endpoint [{endpoint}] unavailable, retry {}/{} in {}s",
+                    cnt + 1,
+                    max_loop,
+                    delay / 1000
+                );
+                if let Some(ui) = &ui {
+                    ui.log(EventLevel::Wrn, retry_msg);
+                    ui.set_endpoint_ok(false);
+                } else {
+                    eprintln!("⚠️ {retry_msg}");
+                }
                 tokio::time::sleep(Duration::from_millis(delay as u64)).await;
             }
+        }
+
+        if let Some(ui) = &ui {
+            ui.set_endpoint_ok(endpoint_available);
         }
 
         if !endpoint_available {
             match config.endpoint_failure_action() {
                 ConfigEndpointFailureAction::Stop => {
-                    eprintln!("❌ Endpoint [{}] unavailable, stopping", endpoint);
-                    save_state(&state_path, &mut state)?;
+                    let msg = format!("Endpoint [{endpoint}] unavailable, stopping");
+                    if let Some(ui) = ui.take() {
+                        ui.log(EventLevel::Err, msg.clone());
+                        save_state(&state_path, &mut state)?;
+                        ui.finish(format!("error: {msg}"));
+                    } else {
+                        eprintln!("❌ {msg}");
+                        save_state(&state_path, &mut state)?;
+                    }
                     return Err(anyhow::Error::msg("Endpoint unavailable"));
                 }
                 ConfigEndpointFailureAction::ChangeIp => {
@@ -909,14 +1115,26 @@ pub async fn scan_networks(
                         .change_ip_url
                         .as_ref()
                         .context("task.change_ip_url is required for endpoint_failure_action = ChangeIp")?;
-                    eprintln!("⚠️ Endpoint [{}] unavailable, requesting IP rotation", endpoint);
+                    let rotate_msg = format!("Endpoint [{endpoint}] unavailable, requesting IP rotation");
+                    if let Some(ui) = &ui {
+                        ui.log(EventLevel::Wrn, rotate_msg);
+                    } else {
+                        eprintln!("⚠️ {rotate_msg}");
+                    }
                     crate::utils::change_ip(change_ip_url).await?;
                     let delay_seconds = task.delay_seconds.unwrap_or(5);
                     sleep(Duration::from_secs(delay_seconds)).await;
 
                     if !ping_endpoint(&endpoint, 1, config.socket_type.as_ref().unwrap(), network_interface) {
-                        eprintln!("❌ Endpoint [{}] still unavailable after IP rotation, stopping", endpoint);
-                        save_state(&state_path, &mut state)?;
+                        let msg = format!("Endpoint [{endpoint}] still unavailable after IP rotation, stopping");
+                        if let Some(ui) = ui.take() {
+                            ui.log(EventLevel::Err, msg.clone());
+                            save_state(&state_path, &mut state)?;
+                            ui.finish(format!("error: {msg}"));
+                        } else {
+                            eprintln!("❌ {msg}");
+                            save_state(&state_path, &mut state)?;
+                        }
                         return Err(anyhow::Error::msg("Endpoint unavailable after IP rotation"));
                     }
                 }
@@ -928,14 +1146,27 @@ pub async fn scan_networks(
                 match &task.stop_action {
                     ConfigStopAction::Delay => {
                         let delay_seconds = task.delay_seconds.unwrap();
-                        println!("PAUSED...delay {} sec", delay_seconds);
+                        let msg = format!("PAUSED...delay {delay_seconds} sec");
+                        if let Some(ui) = &ui {
+                            ui.log(EventLevel::Inf, msg);
+                        } else {
+                            println!("{msg}");
+                        }
                         sleep(Duration::from_secs(delay_seconds)).await;
                     },
                     ConfigStopAction::ChangeIp => {
                         let change_ip_url = task.change_ip_url.as_ref().unwrap();
+                        if let Some(ui) = &ui {
+                            ui.log(EventLevel::Inf, "PAUSED...change IP");
+                        }
                         crate::utils::change_ip(change_ip_url).await?;
                     },
                     ConfigStopAction::Prompt => {
+                        if ui.is_some() {
+                            if let Some(ui) = &ui {
+                                ui.log(EventLevel::Wrn, "Prompt pause: switch console to plain mode for wait_for_any_key");
+                            }
+                        }
                         wait_for_any_key()?;
                     },
                 }
@@ -943,19 +1174,40 @@ pub async fn scan_networks(
         }
     }
 
-    state.finished = true;
-    state.stopped_reason = None;
-    save_state(&state_path, &mut state)?;
-    println!(
-        "{}",
-        format!(
-            "done: {} /24 this run, {} total · {}",
+    if interrupted {
+        save_state(&state_path, &mut state)?;
+        let msg = format!(
+            "interrupted: {} /24 this run, {} total · resume: {}",
             scanned_this_run,
             completed_subnets.len(),
             state.result_jsonl
-        )
-        .cyan()
+        );
+        if let Some(ui) = ui.take() {
+            ui.log(EventLevel::Wrn, "Остановлено пользователем");
+            ui.finish(msg);
+        } else {
+            println!("{}", msg.yellow());
+        }
+        return Ok(());
+    }
+
+    state.finished = true;
+    state.stopped_reason = None;
+    save_state(&state_path, &mut state)?;
+
+    let done_msg = format!(
+        "done: {} /24 this run, {} total · {}",
+        scanned_this_run,
+        completed_subnets.len(),
+        state.result_jsonl
     );
+
+    if let Some(ui) = ui {
+        ui.log(EventLevel::Ok, "Скан завершён");
+        ui.finish(done_msg);
+    } else {
+        println!("{}", done_msg.cyan());
+    }
 
     if config.logger_filetype.len() > 0 {
         let result_path = PathBuf::from(config.results_dir());
@@ -972,4 +1224,55 @@ pub async fn scan_networks(
         }
     }
     Ok(())
+}
+
+struct ScanProgress(Option<ProgressBar>);
+
+impl ScanProgress {
+    fn new(enabled: bool, total: usize, resume_done: usize) -> Self {
+        if !enabled || total == 0 {
+            return Self(None);
+        }
+        let pb = ProgressBar::new(total as u64);
+        pb.set_style(
+            ProgressStyle::with_template(
+                " [{bar:50.cyan/blue}] {pos}/{len} ({percent_precise}%) eta {eta} {msg}",
+            )
+            .unwrap()
+            .progress_chars("█▓░"),
+        );
+        pb.set_position(resume_done as u64);
+        Self(Some(pb))
+    }
+
+    fn is_active(&self) -> bool {
+        self.0.is_some()
+    }
+
+    fn set_position(&self, done: usize, subnet: &str) {
+        if let Some(pb) = &self.0 {
+            pb.set_position(done as u64);
+            pb.set_message(subnet.to_string());
+        }
+    }
+
+    fn set_message(&self, message: impl Into<String>) {
+        if let Some(pb) = &self.0 {
+            pb.set_message(message.into());
+        }
+    }
+
+    fn complete_subnet(&self) {
+        if let Some(pb) = &self.0 {
+            pb.inc(1);
+        }
+    }
+}
+
+impl Drop for ScanProgress {
+    fn drop(&mut self) {
+        if let Some(pb) = self.0.take() {
+            pb.finish_and_clear();
+        }
+    }
 }

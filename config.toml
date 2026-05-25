@@ -3,6 +3,9 @@ geoip_dat_path = "geoip.dat"
 geoip_codes = ["ru"]
 subnets = []
 
+# Консоль: plain (строки, надёжно), tui (дашборд), auto (TUI только с PIZDOS_TUI=1)
+console = "auto"
+
 # Как проверять хосты. ICMP — только информативно. TCP 443 проверяется всегда,
 # даже если ICMP ответил. Остальные порты — из tcp_ports.
 # Быстрый TCP отказ до общего timeout считается живым ответом: хост/фильтр достижим.
@@ -36,12 +39,12 @@ endpoint_failure_action = "Stop"
 # Остановить скан, когда указанный ресурс стал TCP-достижим.
 # Проверка идёт до и после каждой /24. Если сработало после скана,
 # результат последней подсети не пишется и не попадает в resume state.
-#[stop_on_available]
-#enabled = true
-#target = "google.com"
-#port = 443
-#check_before_subnet = true
-#check_after_subnet = true
+[stop_on_available]
+enabled = true
+target = "google1.com"
+port = 443
+check_before_subnet = true
+check_after_subnet = true
 
 # Результаты и resume.
 results_dir = "results"

@@ -6,3 +6,4 @@ pub mod geoip;
 pub mod icmp;
 pub mod tcp_ping;
 pub mod xray_geoip;
+pub mod tui;

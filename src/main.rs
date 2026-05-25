@@ -6,6 +6,7 @@ mod geoip;
 mod icmp;
 mod tcp_ping;
 mod xray_geoip;
+mod tui;
 
 use anyhow::Result;
 use colored::Colorize;

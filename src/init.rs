@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::{
     fs::{self, File},
-    io::Read
+    io::{IsTerminal, Read},
 };
 use std::path::Path;
 
@@ -38,6 +38,17 @@ pub struct Config {
     pub task: Option<SubnetsScan>,
     pub db_update: Option<Vec<ConfigDBUpdate>>,
     pub stop_on_available: Option<StopOnAvailableConfig>,
+    #[serde(default)]
+    pub console: Option<ConsoleMode>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConsoleMode {
+    #[default]
+    Plain,
+    Auto,
+    Tui,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -164,6 +175,21 @@ impl Config {
 
     pub fn network_interface(&self) -> Option<&str> {
         self.network_interface.as_deref()
+    }
+
+    pub fn console_mode(&self) -> ConsoleMode {
+        self.console.unwrap_or_default()
+    }
+
+    pub fn use_tui(&self) -> bool {
+        match self.console_mode() {
+            ConsoleMode::Tui => true,
+            ConsoleMode::Plain => false,
+            ConsoleMode::Auto => {
+                std::io::stdout().is_terminal()
+                    && std::env::var("PIZDOS_TUI").is_ok_and(|v| v != "0" && v != "false")
+            }
+        }
     }
 
     pub fn endpoint_failure_action(&self) -> ConfigEndpointFailureAction {
