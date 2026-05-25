@@ -136,6 +136,21 @@ do
   curl -fsSL "$RAW_BASE/subnets/$f" -o "$SUBNETS_DIR/$f"
 done
 
+if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" = "0" ]; then
+  say "==> Applying Linux ICMP setting: net.ipv4.ping_group_range=0 1000"
+  if command -v sysctl >/dev/null 2>&1; then
+    if sysctl -w net.ipv4.ping_group_range="0 1000" >/dev/null 2>&1; then
+      say "==> ICMP setting applied"
+    else
+      say "WARNING: failed to apply sysctl ping_group_range; apply manually:"
+      say "  sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\""
+    fi
+  else
+    say "WARNING: sysctl not found; apply manually:"
+    say "  sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\""
+  fi
+fi
+
 PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
 PATH_NEEDS_REFRESH=0
 if ! echo ":$PATH:" | grep -q ":$BIN_DIR:"; then
@@ -165,6 +180,8 @@ if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
 fi
 
 say "==> Running checks"
+export PATH="$BIN_DIR:$PATH"
+hash -r 2>/dev/null || true
 if "$LAUNCHER" --help >/dev/null 2>&1; then
   say "==> Launcher check: OK"
 else
@@ -190,11 +207,11 @@ say ""
 say "Data dir:"
 say "  $BASE_DIR"
 say ""
-if [ "$PATH_NEEDS_REFRESH" = "1" ]; then
-  say "If command is not found in current shell, run:"
-  say "  $PATH_LINE"
-  if [ "$(id -u)" != "0" ]; then
-    say "Or reload shell profile:"
-    say "  source ~/.bashrc   # or: source ~/.zshrc"
-  fi
+say "Run in current shell (recommended):"
+say "  hash -r"
+say "  $PATH_LINE"
+say "  type -a $BIN_NAME"
+if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
+  say "Or reload shell profile:"
+  say "  source ~/.bashrc   # or: source ~/.zshrc"
 fi
