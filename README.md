@@ -28,10 +28,13 @@ curl -L -o db/GeoLite2-City.mmdb \
   https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
 curl -L -o db/GeoLite2-ASN.mmdb \
   https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
-
-./pizdos-scanner geoip-scan ru
 ```
 
+Запустите сканер:
+
+```bash
+./pizdos-scanner geoip-scan ru
+```
 Если видите ошибку вида `GLIBC_2.38/2.39 not found`, используйте Docker-раздел ниже или соберите бинарь из исходников на своей машине (раздел `Сборка из исходников`).
 
 ### Из Docker
