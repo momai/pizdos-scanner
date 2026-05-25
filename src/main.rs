@@ -136,22 +136,48 @@ enum SubnetSubCommand {
     Full
 }
 
-fn resolve_config_path(input: &str) -> (String, bool) {
+fn resolve_config_path(input: &str) -> Result<(String, bool)> {
     let requested = PathBuf::from(input);
     if requested.exists() {
-        return (input.to_string(), false);
+        return Ok((input.to_string(), false));
     }
 
     if input == "config.toml" {
         if let Ok(home) = std::env::var("HOME") {
-            let fallback = PathBuf::from(home).join(".pizdos-scanner").join("config.toml");
+            let fallback = PathBuf::from(&home).join(".pizdos-scanner").join("config.toml");
             if fallback.exists() {
-                return (fallback.to_string_lossy().to_string(), true);
+                return Ok((fallback.to_string_lossy().to_string(), true));
             }
+
+            // Neither local nor ~/.pizdos-scanner has config.toml
+            let data_dir = PathBuf::from(&home).join(".pizdos-scanner");
+            let bin_dir = if std::env::var("USER").unwrap_or_default() == "root"
+                || std::env::var("HOME").unwrap_or_default() == "/root"
+            {
+                "/usr/local/bin".to_string()
+            } else {
+                format!("{}/.local/bin", home)
+            };
+
+            anyhow::bail!(
+                "Не найден config.toml.\n\
+                \n\
+                Если вы установили pizdos-scanner через install.sh:\n\
+                  1) Выполните в текущей сессии:\n\
+                       hash -r\n\
+                       export PATH=\"{bin_dir}:$PATH\"\n\
+                  2) Или перейдите в папку с данными:\n\
+                       cd \"{data_dir}\"\n\
+                \n\
+                Если ещё не устанавливали:\n\
+                  curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh",
+                bin_dir = bin_dir,
+                data_dir = data_dir.display(),
+            );
         }
     }
 
-    (input.to_string(), false)
+    Ok((input.to_string(), false))
 }
 
 #[tokio::main]
@@ -169,9 +195,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let (config_path, fallback_used) = resolve_config_path(&args.config);
+    let (config_path, fallback_used) = resolve_config_path(&args.config)?;
     if fallback_used {
-        println!("Using config: {}", config_path);
+        eprintln!("Using config: {}", config_path);
     }
     let config: Config = Config::load(&config_path)?;
 
