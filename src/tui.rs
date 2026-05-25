@@ -144,6 +144,7 @@ struct ScanDashboard {
     config: ScanUiConfig,
     scanned_total: usize,
     scanned_this_run: usize,
+    completed_subnet_seconds: f64,
     alive_subnets: usize,
     icmp_only_subnets: usize,
     dead_subnets: usize,
@@ -280,6 +281,7 @@ impl ScanDashboard {
             self.rejected_hosts_total += rejected;
             self.scanned_this_run += 1;
             self.scanned_total += 1;
+            self.completed_subnet_seconds += seconds;
         }
 
         let row = SubnetRow {
@@ -337,23 +339,30 @@ impl ScanDashboard {
     }
 
     fn subnets_per_minute(&self) -> f64 {
-        let mins = self.started_at.elapsed().as_secs_f64() / 60.0;
-        if mins < 0.01 {
+        let avg_secs = self.avg_subnet_seconds();
+        if avg_secs <= 0.0 {
             return 0.0;
         }
-        self.scanned_this_run as f64 / mins
+        60.0 / avg_secs
+    }
+
+    fn avg_subnet_seconds(&self) -> f64 {
+        if self.scanned_this_run == 0 {
+            return 0.0;
+        }
+        self.completed_subnet_seconds / self.scanned_this_run as f64
     }
 
     fn eta_label(&self) -> String {
-        let rate = self.subnets_per_minute();
-        if rate < 0.1 {
+        let avg_secs = self.avg_subnet_seconds();
+        if avg_secs <= 0.0 {
             return "—".to_string();
         }
         let remaining = self
             .config
             .total_subnets
             .saturating_sub(self.scanned_total);
-        let mins = remaining as f64 / rate;
+        let mins = (remaining as f64 * avg_secs) / 60.0;
         if mins < 60.0 {
             format!("~{:.0}m", mins)
         } else if mins < 60.0 * 48.0 {
@@ -384,6 +393,7 @@ impl Default for ScanDashboard {
             },
             scanned_total: 0,
             scanned_this_run: 0,
+            completed_subnet_seconds: 0.0,
             alive_subnets: 0,
             icmp_only_subnets: 0,
             dead_subnets: 0,
@@ -672,6 +682,11 @@ fn render_stats(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
 
     let uptime = format_duration(dash.started_at.elapsed());
     let rate = format!("{:.1}", dash.subnets_per_minute());
+    let avg = if dash.avg_subnet_seconds() > 0.0 {
+        format!("{:.1}s/subnet", dash.avg_subnet_seconds())
+    } else {
+        "—".to_string()
+    };
     let done = dash.progress_position();
     let total = dash.config.total_subnets;
     let pct = dash.progress_percent();
@@ -681,6 +696,8 @@ fn render_stats(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
         Span::styled(uptime, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  │  "),
         Span::styled(format!("{rate}/min"), Style::default().fg(Color::Cyan)),
+        Span::raw("  │  "),
+        Span::styled(avg, Style::default().fg(Color::DarkGray)),
         Span::raw("  │  ETA "),
         Span::styled(dash.eta_label(), Style::default().fg(Color::Cyan)),
         Span::raw("  │  "),

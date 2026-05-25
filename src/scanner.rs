@@ -7,7 +7,7 @@ use ipnetwork::Ipv4Network;
 use std::collections::HashSet;
 
 use crate::geoip::{GeoIpService, SubnetInfo};
-use crate::icmp::{probe_host, split_ipv4_to_24};
+use crate::icmp::{probe_host, split_ipv4_to_24, ProbeTuning};
 use crate::init::{Config, ConfigPingType, ConfigSaveResultFileType, ConfigSocketType};
 use crate::scan_state::{
     build_job_id, create_state, load_state, save_state, state_path, ScanProgress,
@@ -96,9 +96,13 @@ pub async fn scan_networks(
             .socket_type
             .as_ref()
             .context("socket_type is required when ICMP is enabled")?;
+        let tuning = ProbeTuning::from_config(config);
         if !probe_host(
             "127.0.0.1".parse()?,
             1,
+            tuning.icmp_timeout,
+            tuning.icmp_retry_delay,
+            tuning.tcp_timeout,
             socket_type,
             &vec![ConfigPingType::ICMP],
             &[],

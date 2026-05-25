@@ -4,6 +4,7 @@ use std::{
     io::{IsTerminal, Read},
 };
 use std::path::Path;
+use std::time::Duration;
 
 const CITY_PRIMARY_URL: &str = "https://git.io/GeoLite2-City.mmdb";
 const CITY_MIRROR_URL: &str = "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb";
@@ -31,6 +32,10 @@ pub struct Config {
     pub socket_type: Option<ConfigSocketType>,
     #[serde(default = "default_ping_type")]
     pub ping_type: Vec<ConfigPingType>,
+    pub probe_attempts: Option<u8>,
+    pub icmp_timeout_ms: Option<u64>,
+    pub icmp_retry_delay_ms: Option<u64>,
+    pub tcp_timeout_ms: Option<u64>,
     #[serde(default)]
     pub logger_filetype: Vec<ConfigSaveResultFileType>,
     #[serde(default = "default_ipinfo_providers")]
@@ -196,6 +201,22 @@ impl Config {
         self.endpoint_failure_action
             .clone()
             .unwrap_or(ConfigEndpointFailureAction::Stop)
+    }
+
+    pub fn probe_attempts(&self) -> u8 {
+        self.probe_attempts.unwrap_or(2).max(1)
+    }
+
+    pub fn icmp_timeout(&self) -> Duration {
+        Duration::from_millis(self.icmp_timeout_ms.unwrap_or(1_000).max(1))
+    }
+
+    pub fn icmp_retry_delay(&self) -> Duration {
+        Duration::from_millis(self.icmp_retry_delay_ms.unwrap_or(200))
+    }
+
+    pub fn tcp_timeout(&self) -> Duration {
+        Duration::from_millis(self.tcp_timeout_ms.unwrap_or(2_000).max(1))
     }
 
     pub fn load(path: &str) -> anyhow::Result<Self> {

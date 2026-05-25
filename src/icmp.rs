@@ -37,6 +37,25 @@ impl HostProbeResult {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ProbeTuning {
+    pub attempts: u8,
+    pub icmp_timeout: Duration,
+    pub icmp_retry_delay: Duration,
+    pub tcp_timeout: Duration,
+}
+
+impl ProbeTuning {
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            attempts: config.probe_attempts(),
+            icmp_timeout: config.icmp_timeout(),
+            icmp_retry_delay: config.icmp_retry_delay(),
+            tcp_timeout: config.tcp_timeout(),
+        }
+    }
+}
+
 fn tcp_ports_with_443(tcp_ports: &[u16]) -> Vec<u16> {
     let mut ports: Vec<u16> = tcp_ports.to_vec();
     if !ports.contains(&443) {
@@ -64,7 +83,7 @@ fn icmp_unavailable_hint(socket_type: &ConfigSocketType) -> &'static str {
 
 pub async fn ping_subnet_matrix_rayon(
     base_ip: &str,
-    attempts: u8,
+    tuning: ProbeTuning,
     socket_type: &ConfigSocketType,
     ping_type: &Vec<ConfigPingType>,
     tcp_ports: &[u16],
@@ -81,6 +100,9 @@ pub async fn ping_subnet_matrix_rayon(
         && !probe_host(
             "127.0.0.1".parse()?,
             1,
+            tuning.icmp_timeout,
+            tuning.icmp_retry_delay,
+            tuning.tcp_timeout,
             &socket_type,
             &vec![ConfigPingType::ICMP],
             &[],
@@ -107,7 +129,18 @@ pub async fn ping_subnet_matrix_rayon(
         .into_par_iter()
         .map(|i| {
             let ip = IpAddr::V4(Ipv4Addr::new(a, b, c, i));
-            let probe = probe_host(ip, attempts, &socket_type, &ping_type, tcp_ports, tcp_sni_host, network_interface);
+            let probe = probe_host(
+                ip,
+                tuning.attempts,
+                tuning.icmp_timeout,
+                tuning.icmp_retry_delay,
+                tuning.tcp_timeout,
+                &socket_type,
+                &ping_type,
+                tcp_ports,
+                tcp_sni_host,
+                network_interface,
+            );
             (i, probe)
         })
         .collect();
@@ -236,6 +269,9 @@ pub(crate) fn split_ipv4_to_24(net: Ipv4Network) -> anyhow::Result<Vec<Ipv4Netwo
 pub(crate) fn probe_host(
     ip: IpAddr,
     attempts: u8,
+    icmp_timeout: Duration,
+    icmp_retry_delay: Duration,
+    tcp_timeout: Duration,
     socket_type: &ConfigSocketType,
     ping_type: &Vec<ConfigPingType>,
     tcp_ports: &[u16],
@@ -252,7 +288,7 @@ pub(crate) fn probe_host(
     if ping_type.contains(&ConfigPingType::ICMP) {
         for _ in 0..attempts {
             let mut ping = Ping::new(ip);
-            ping.timeout(Duration::from_secs(1)).socket_type(socket);
+            ping.timeout(icmp_timeout).socket_type(socket);
             #[cfg(any(target_os = "linux", target_os = "android"))]
             if let Some(network_interface) = network_interface {
                 ping.bind_device(network_interface);
@@ -263,7 +299,7 @@ pub(crate) fn probe_host(
                     result.icmp = true;
                     break;
                 }
-                Err(_) => std::thread::sleep(Duration::from_millis(200)),
+                Err(_) => std::thread::sleep(icmp_retry_delay),
             }
         }
     }
@@ -277,7 +313,7 @@ pub(crate) fn probe_host(
                     *port,
                     tcp_sni_host,
                     network_interface,
-                    Duration::from_secs(2),
+                    tcp_timeout,
                 );
                 if status.is_alive() {
                     if !result.tcp_ports.contains(port) {
@@ -306,6 +342,9 @@ fn ping_host_icmp_only(
     probe_host(
         ip,
         attempts,
+        Duration::from_secs(1),
+        Duration::from_millis(200),
+        Duration::from_secs(2),
         socket_type,
         &vec![ConfigPingType::ICMP],
         &[],
@@ -350,6 +389,7 @@ pub(crate) async fn process_subnet(
     geoip: Option<&GeoIpService>,
     source: &str,
     fallback_country: Option<&str>,
+    tuning: ProbeTuning,
     socket_type: &ConfigSocketType,
     ping_type: &Vec<ConfigPingType>,
     tcp_ports: &[u16],
@@ -378,7 +418,18 @@ pub(crate) async fn process_subnet(
     let host_results: Vec<HostProbeRecord> = hosts
         .par_iter()
         .map(|&ip| {
-            let probe = probe_host(ip, 2, socket_type, ping_type, tcp_ports, tcp_sni_host, network_interface);
+            let probe = probe_host(
+                ip,
+                tuning.attempts,
+                tuning.icmp_timeout,
+                tuning.icmp_retry_delay,
+                tuning.tcp_timeout,
+                socket_type,
+                ping_type,
+                tcp_ports,
+                tcp_sni_host,
+                network_interface,
+            );
             let octet = match ip {
                 IpAddr::V4(ip) => ip.octets()[3],
                 IpAddr::V6(_) => 0,

@@ -4,7 +4,7 @@ use std::{collections::HashSet, path::Path};
 use tokio::time::Instant;
 
 use crate::geoip::{GeoIpService, SubnetInfo};
-use crate::icmp::process_subnet;
+use crate::icmp::{process_subnet, ProbeTuning};
 use crate::init::{Config, ConfigSocketType};
 use crate::scan_state::{save_state_snapshot, ScanProgress, ScanState};
 use crate::scanner::scan_conditions::{
@@ -118,6 +118,7 @@ pub(crate) async fn process_subnet_iteration(
         geoip,
         source,
         fallback_country,
+        ProbeTuning::from_config(config),
         config.socket_type.as_ref().unwrap(),
         &config.ping_type,
         tcp_ports,

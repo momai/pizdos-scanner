@@ -190,6 +190,10 @@ geoip_codes = ["ru"]
 
 ping_type = ["ICMP", "TCP"]
 tcp_ports = [80, 443]
+probe_attempts = 2
+icmp_timeout_ms = 1000
+icmp_retry_delay_ms = 200
+tcp_timeout_ms = 2000
 
 results_dir = "results"
 resume_state_dir = "results/state"
@@ -203,7 +207,7 @@ console = "plain" # plain | tui | auto
 - `console = "plain"` — progress bar (по умолчанию, удобно для Docker).
 - `console = "tui"` — дашборд для интерактивного локального терминала.
 
-TCP считается живым, если соединение прошло или порт быстро ответил отказом до общего таймаута 2 секунды.
+TCP считается живым, если соединение прошло или порт быстро ответил отказом до `tcp_timeout_ms`.
 Быстрый отказ отдельно попадает в `tcp_<port>_rejected_hosts` в CSV и `tcp_rejected` в JSONL.
 
 ### Дополнительные параметры
@@ -218,6 +222,15 @@ tcp_sni_host = "example.com"
 
 ```toml
 network_interface = "eth1"
+```
+
+Тюнинг скорости/чувствительности probe:
+
+```toml
+probe_attempts = 2        # сколько попыток ICMP/TCP на один IP
+icmp_timeout_ms = 800     # timeout одного ICMP
+icmp_retry_delay_ms = 100 # пауза между ICMP попытками
+tcp_timeout_ms = 1200     # timeout одного TCP подключения
 ```
 
 ### Результаты и resume

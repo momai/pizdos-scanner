@@ -21,7 +21,7 @@ use clap::{
 use tokio::time::sleep;
 use crate::ipinfo::get_providers_info;
 use crate::init::{Config, ConfigSocketType};
-use crate::icmp::{app, ping_subnet_matrix_rayon, scan_networks, SubnetScanFile};
+use crate::icmp::{app, ping_subnet_matrix_rayon, scan_networks, ProbeTuning, SubnetScanFile};
 use crate::geoip::download_dbs;
 use crate::utils::{get_current_ip, write_final_ip_lists_from_jsonl};
 
@@ -172,7 +172,7 @@ async fn main() -> Result<()> {
             let tcp_ports = config.tcp_ports();
             let ip = ping_subnet_matrix_rayon(
                 ip.as_str(),
-                2,
+                ProbeTuning::from_config(&config),
                 &config.socket_type.as_ref().unwrap(),
                 &config.ping_type,
                 &tcp_ports,

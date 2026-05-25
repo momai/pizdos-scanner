@@ -6,21 +6,32 @@ subnets = [
   "5.6.0.0/16"
 ]
 
+# Метка для имени файлов результата и отдельного resume state.
+operator = "beeline"
+
 # Консоль: plain (строки, надёжно), tui (дашборд), auto (TUI только с PIZDOS_TUI=1)
 console = "tui"
 
-# Как проверять хосты. ICMP — только информативно. TCP 443 проверяется всегда,
-# даже если ICMP ответил. Остальные порты — из tcp_ports.
-# Быстрый TCP отказ до общего timeout считается живым ответом: хост/фильтр достижим.
-# В результатах такие ответы отдельно попадают в tcp_*_rejected_hosts / tcp_rejected.
 # В Docker/WSL надежнее RAW: compose уже выдает NET_RAW.
 # DGRAM можно использовать без sudo на Linux, если разрешен net.ipv4.ping_group_range.
 socket_type = "DGRAM" # DGRAM or RAW
+
 ping_type = [
     "ICMP",
     "TCP"
 ]
 tcp_ports = [443]
+
+
+# Тюнинг probe.
+# probe_attempts: сколько раз пробовать ICMP/TCP на один IP (>=1).
+# icmp_timeout_ms: timeout одного ICMP запроса.
+# icmp_retry_delay_ms: пауза между ICMP попытками.
+# tcp_timeout_ms: timeout одного TCP подключения (на порт).
+probe_attempts = 2
+icmp_timeout_ms = 1000
+icmp_retry_delay_ms = 200
+tcp_timeout_ms = 2000
 
 # Для HTTPS/TLS TCP-проверки с SNI. Если включить, tcp_ports должны быть TLS-портами.
 #tcp_sni_host = "example.com"
@@ -30,7 +41,7 @@ tcp_ports = [443]
 # В Docker для этого включен network_mode: host в compose.yaml.
 # network_interface = "eth0"
 
-# Контрольный "белый" endpoint. После каждой /24 подсети сканер проверяет,
+# Контрольный endpoint. После каждой /24 подсети сканер проверяет,
 # что интернет/маршрут живой. Можно указать IP или hostname.
 endpoint = "77.88.8.8"
 
@@ -38,19 +49,6 @@ endpoint = "77.88.8.8"
 # Stop     - остановить скан
 # ChangeIp - дернуть [task].change_ip_url, подождать delay_seconds и проверить endpoint снова
 endpoint_failure_action = "Stop"
-
-# Результаты и resume.
-results_dir = "results"
-resume_state_dir = "results/state"
-resume = true
-
-# Просто метка для имени файлов результата и отдельного resume state.
-operator = "beeline"
-
-logger_filetype = [     # csv, json
-#    "Csv",
-#    "Json"
-]
 
 # Остановить скан, когда указанный ресурс стал TCP-достижим.
 # Проверка идёт до и после каждой /24. Если сработало после скана,
@@ -61,6 +59,17 @@ target = "google1.com"
 port = 443
 check_before_subnet = true
 check_after_subnet = true
+
+# Результаты и resume.
+results_dir = "results"
+resume_state_dir = "results/state"
+resume = true
+
+logger_filetype = [     # csv, json
+#    "Csv",
+#    "Json"
+]
+
 
 # GeoIP-обогащение результатов. Не обязательно для скана, но дает city/asn/as_name.
 #geoip_city_db = "/home/user/GeoLite2-City.mmdb"
