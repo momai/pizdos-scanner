@@ -74,8 +74,7 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 
 ## Набор команд запуска
 
-### Для бинаря
-
+- Для установленного приложения:
 ```bash
 ./pizdos-scanner help                              # список всех команд
 ./pizdos-scanner geoip-list                         # показать группы из geoip.dat
@@ -91,11 +90,9 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 
 Если бинарь установлен в `PATH`, просто используйте `pizdos-scanner ...`.
 
-### Для Docker
-
+- Для Docker:
 ```bash
 docker compose run --rm --no-build pizdos-scanner help
-docker compose run --rm --no-build pizdos-scanner geoip-list
 docker compose run --rm --no-build pizdos-scanner geoip-scan ru
 ...
 ```
@@ -104,7 +101,6 @@ docker compose run --rm --no-build pizdos-scanner geoip-scan ru
 - `--no-build` ускоряет запуск, если образ уже собран/скачан.
 
 Если остались старые контейнеры:
-
 ```bash
 docker compose down --remove-orphans
 ```
@@ -115,8 +111,6 @@ docker compose down --remove-orphans
 
 Перекрывающиеся CIDR (например `/22` и вложенный `/23`) схлопываются при генерации.
 
-### Для бинаря
-
 ```bash
 ./pizdos-scanner subnets subnets/yandex-cloud.txt
 ./pizdos-scanner subnets subnets/vk-cloud.txt
@@ -125,9 +119,7 @@ docker compose down --remove-orphans
 ./pizdos-scanner subnets subnets/selectel.txt
 ./pizdos-scanner subnets subnets/all-known-hosters.txt   # все хостеры разом
 ```
-
-### Для Docker
-
+Тоже, для Docker:
 ```bash
 docker compose run --rm --no-build pizdos-scanner subnets subnets/yandex-cloud.txt
 ```
