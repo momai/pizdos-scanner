@@ -13,6 +13,9 @@ else
   DEFAULT_BIN_DIR="$HOME/.local/bin"
 fi
 BIN_DIR="${BIN_DIR:-$DEFAULT_BIN_DIR}"
+REAL_BIN="$BIN_DIR/${BIN_NAME}.bin"
+LAUNCHER="$BIN_DIR/$BIN_NAME"
+
 DB_DIR="$BASE_DIR/db"
 SUBNETS_DIR="$BASE_DIR/subnets"
 
@@ -32,6 +35,8 @@ need_cmd uname
 need_cmd install
 need_cmd mkdir
 need_cmd chmod
+need_cmd grep
+need_cmd id
 
 ARCH_RAW="$(uname -m)"
 case "$ARCH_RAW" in
@@ -50,7 +55,6 @@ esac
 
 BIN_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/latest/download/${BIN_NAME}-linux-${ARCH_SUFFIX}"
 RAW_BASE="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$REPO_BRANCH"
-
 CONFIG_URL="$RAW_BASE/config.toml"
 GEOIP_URL="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
 CITY_DB_URL="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb"
@@ -64,15 +68,15 @@ mkdir -p "$BASE_DIR" "$DB_DIR" "$SUBNETS_DIR" "$BIN_DIR" "$BASE_DIR/results/stat
 
 TMP_BIN="$BASE_DIR/${BIN_NAME}.tmp"
 curl -fsSL "$BIN_URL" -o "$TMP_BIN"
-install -m 755 "$TMP_BIN" "$BIN_DIR/${BIN_NAME}.bin"
+install -m 755 "$TMP_BIN" "$REAL_BIN"
 rm -f "$TMP_BIN"
 
-cat > "$BIN_DIR/$BIN_NAME" <<EOF
+cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env sh
 set -eu
 
 BASE_DIR="\${PIZDOS_HOME:-$BASE_DIR}"
-REAL_BIN="$BIN_DIR/${BIN_NAME}.bin"
+REAL_BIN="$REAL_BIN"
 
 if [ ! -x "\$REAL_BIN" ]; then
   echo "ERROR: real binary not found: \$REAL_BIN" >&2
@@ -80,28 +84,40 @@ if [ ! -x "\$REAL_BIN" ]; then
 fi
 
 HAS_CONFIG_ARG=0
+PREV_WAS_CONFIG=0
 for arg in "\$@"; do
+  if [ "\$PREV_WAS_CONFIG" -eq 1 ]; then
+    HAS_CONFIG_ARG=1
+    PREV_WAS_CONFIG=0
+    continue
+  fi
   case "\$arg" in
     -c|--config)
       HAS_CONFIG_ARG=1
-      break
+      PREV_WAS_CONFIG=1
+      ;;
+    --config=*)
+      HAS_CONFIG_ARG=1
       ;;
   esac
 done
 
 if [ "\$HAS_CONFIG_ARG" -eq 0 ] && [ -f "\$BASE_DIR/config.toml" ]; then
+  cd "\$BASE_DIR"
   exec "\$REAL_BIN" --config "\$BASE_DIR/config.toml" "\$@"
 fi
 
 exec "\$REAL_BIN" "\$@"
 EOF
-chmod 755 "$BIN_DIR/$BIN_NAME"
-
-say "==> Installed launcher: $BIN_DIR/$BIN_NAME"
-say "==> Installed binary : $BIN_DIR/${BIN_NAME}.bin"
+chmod 755 "$LAUNCHER"
 
 say "==> Downloading config + geo data"
-curl -fsSL "$CONFIG_URL" -o "$BASE_DIR/config.toml"
+if [ -f "$BASE_DIR/config.toml" ]; then
+  say "==> Keeping existing config.toml"
+  curl -fsSL "$CONFIG_URL" -o "$BASE_DIR/config.toml.dist"
+else
+  curl -fsSL "$CONFIG_URL" -o "$BASE_DIR/config.toml"
+fi
 curl -fsSL "$GEOIP_URL" -o "$BASE_DIR/geoip.dat"
 
 say "==> Downloading GeoIP mmdb (optional but useful)"
@@ -148,16 +164,31 @@ if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
   fi
 fi
 
+say "==> Running checks"
+if "$LAUNCHER" --help >/dev/null 2>&1; then
+  say "==> Launcher check: OK"
+else
+  say "WARNING: launcher check failed; try: $LAUNCHER --help"
+fi
+
+CMD_PATH="$(command -v "$BIN_NAME" 2>/dev/null || true)"
+if [ -n "$CMD_PATH" ] && [ "$CMD_PATH" != "$LAUNCHER" ]; then
+  say "WARNING: first '$BIN_NAME' in PATH is not launcher:"
+  say "  command -v $BIN_NAME -> $CMD_PATH"
+  say "  expected -> $LAUNCHER"
+  say "Run in current shell:"
+  say "  hash -r"
+  say "  export PATH=\"$BIN_DIR:\$PATH\""
+  say "  type -a $BIN_NAME"
+fi
+
 say ""
 say "Done."
-say ""
-say "Use scanner from project data dir:"
-say "  cd \"$BASE_DIR\""
+say "Run from anywhere:"
 say "  $BIN_NAME geoip-scan ru"
 say ""
-say "Quick hoster scan:"
-say "  cd \"$BASE_DIR\""
-say "  $BIN_NAME subnets subnets/all-known-hosters.txt"
+say "Data dir:"
+say "  $BASE_DIR"
 say ""
 if [ "$PATH_NEEDS_REFRESH" = "1" ]; then
   say "If command is not found in current shell, run:"
@@ -166,28 +197,4 @@ if [ "$PATH_NEEDS_REFRESH" = "1" ]; then
     say "Or reload shell profile:"
     say "  source ~/.bashrc   # or: source ~/.zshrc"
   fi
-fi
-
-say "==> Running post-install checks"
-if "$BIN_DIR/$BIN_NAME" --help >/dev/null 2>&1; then
-  say "==> Launcher self-check: OK"
-else
-  say "WARNING: launcher self-check failed (try: $BIN_DIR/$BIN_NAME --help)"
-fi
-
-CMD_PATH="$(command -v "$BIN_NAME" 2>/dev/null || true)"
-if [ -n "$CMD_PATH" ] && [ "$CMD_PATH" != "$BIN_DIR/$BIN_NAME" ]; then
-  say ""
-  say "WARNING: another '$BIN_NAME' is first in PATH:"
-  say "  command -v $BIN_NAME -> $CMD_PATH"
-  say "Expected launcher path:"
-  say "  $BIN_DIR/$BIN_NAME"
-  say ""
-  say "Run in current shell:"
-  say "  hash -r"
-  say "  export PATH=\"$BIN_DIR:\$PATH\""
-  say "  type -a $BIN_NAME"
-  say ""
-  say "Or use absolute command directly:"
-  say "  $BIN_DIR/$BIN_NAME geoip-scan ru"
 fi
