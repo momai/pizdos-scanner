@@ -36,7 +36,6 @@ sh install.sh
   - обычный пользователь -> `~/.local/bin`,
 - ставит launcher-обёртку `pizdos-scanner`, которая по умолчанию использует `~/.pizdos-scanner/config.toml` и работает из любой директории,
 - при переустановке не перезаписывает ваш `config.toml` (кладёт свежий шаблон в `config.toml.dist`),
-- для root на Linux пытается применить `sysctl -w net.ipv4.ping_group_range="0 1000"`,
 - для обычного пользователя добавляет `~/.local/bin` в `PATH` (`~/.bashrc`/`~/.zshrc`),
 - готовит рабочую директорию `~/.pizdos-scanner`.
 

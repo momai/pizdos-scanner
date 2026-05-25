@@ -136,18 +136,17 @@ do
   curl -fsSL "$RAW_BASE/subnets/$f" -o "$SUBNETS_DIR/$f"
 done
 
-if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" = "0" ]; then
-  say "==> Applying Linux ICMP setting: net.ipv4.ping_group_range=0 1000"
+if [ "$(uname -s)" = "Linux" ]; then
   if command -v sysctl >/dev/null 2>&1; then
-    if sysctl -w net.ipv4.ping_group_range="0 1000" >/dev/null 2>&1; then
-      say "==> ICMP setting applied"
+    if [ "$(id -u)" = "0" ]; then
+      say "==> Applying ICMP non-root hint: net.ipv4.ping_group_range=0 1000"
+      if ! sysctl -w net.ipv4.ping_group_range="0 1000" >/dev/null 2>&1; then
+        say "WARNING: failed to apply net.ipv4.ping_group_range automatically"
+      fi
     else
-      say "WARNING: failed to apply sysctl ping_group_range; apply manually:"
+      say "==> Tip for Linux DGRAM ICMP (optional):"
       say "  sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\""
     fi
-  else
-    say "WARNING: sysctl not found; apply manually:"
-    say "  sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\""
   fi
 fi
 
@@ -179,39 +178,55 @@ if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
   fi
 fi
 
-say "==> Running checks"
+# NOTE: This affects only current installer process (not parent shell),
+# but helps post-install checks below.
 export PATH="$BIN_DIR:$PATH"
-hash -r 2>/dev/null || true
+
+LAUNCHER_OK=0
 if "$LAUNCHER" --help >/dev/null 2>&1; then
-  say "==> Launcher check: OK"
-else
-  say "WARNING: launcher check failed; try: $LAUNCHER --help"
+  LAUNCHER_OK=1
 fi
 
 CMD_PATH="$(command -v "$BIN_NAME" 2>/dev/null || true)"
+PATH_CONFLICT=0
 if [ -n "$CMD_PATH" ] && [ "$CMD_PATH" != "$LAUNCHER" ]; then
-  say "WARNING: first '$BIN_NAME' in PATH is not launcher:"
-  say "  command -v $BIN_NAME -> $CMD_PATH"
-  say "  expected -> $LAUNCHER"
-  say "Run in current shell:"
-  say "  hash -r"
-  say "  export PATH=\"$BIN_DIR:\$PATH\""
-  say "  type -a $BIN_NAME"
+  PATH_CONFLICT=1
 fi
 
 say ""
-say "Done."
-say "Run from anywhere:"
-say "  $BIN_NAME geoip-scan ru"
+say "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ "$LAUNCHER_OK" = "1" ]; then
+  say " ✓  pizdos-scanner установлен успешно"
+else
+  say " ✗  Установка завершена, но launcher не ответил"
+fi
+say "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 say ""
-say "Data dir:"
-say "  $BASE_DIR"
+say "  Бинарь    $REAL_BIN"
+say "  Launcher  $LAUNCHER"
+say "  Данные    $BASE_DIR"
 say ""
-say "Run in current shell (recommended):"
+say "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+say " Выполните в текущей сессии (1 раз):"
+say "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+say ""
 say "  hash -r"
-say "  $PATH_LINE"
-say "  type -a $BIN_NAME"
+say "  export PATH=\"$BIN_DIR:\$PATH\""
+say ""
+if [ "$PATH_CONFLICT" = "1" ]; then
+  say "  ⚠  В PATH есть старый бинарь: $CMD_PATH"
+  say "     После hash -r он будет перекрыт новым."
+  say ""
+fi
+say "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+say " После этого запускайте откуда угодно:"
+say "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+say ""
+say "  pizdos-scanner geoip-scan ru"
+say "  pizdos-scanner subnets subnets/all-known-hosters.txt"
+say ""
 if [ "$(id -u)" != "0" ] && [ "$PATH_NEEDS_REFRESH" = "1" ]; then
-  say "Or reload shell profile:"
-  say "  source ~/.bashrc   # or: source ~/.zshrc"
+  say "  Для постоянного эффекта (уже добавлено в профиль, но применится в следующей сессии):"
+  say "  source ~/.bashrc"
+  say ""
 fi
