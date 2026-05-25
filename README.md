@@ -13,9 +13,33 @@ ICMP используется как дополнительный сигнал, 
 
 ### Из бинаря
 
+**One-liner (рекомендуется):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh
+```
+
+Скрипт сам:
+- определит архитектуру (`x86_64` / `arm64`);
+- скачает бинарь, `geoip.dat`, `config.toml`, GeoLite2 mmdb и `subnets/*.txt`;
+- положит данные в `~/pizdos-scanner`;
+- установит wrapper в `~/.local/bin` и **пропишет PATH** в `~/.bashrc` / `~/.profile` / `~/.zshrc`.
+
+После установки команда доступна глобально:
+
+```bash
+pizdos-scanner geoip-scan ru
+```
+
+Опции через env:
+
+```bash
+PIZDOS_DIR=~/scan SKIP_MMDB=1 curl -fsSL .../install.sh | sh
+```
+
 Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
 
-Скачайте бинарь под вашу архитектуру:
+Ручная установка (если нужен контроль каждого шага):
 
 ```bash
 # x86_64
