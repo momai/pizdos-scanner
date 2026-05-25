@@ -11,6 +11,20 @@ use serde::{Deserialize, Serialize};
 use anyhow::Context;
 use crate::geoip::SubnetInfo;
 
+pub fn parse_cidr_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(ToString::to_string)
+        .collect()
+}
+
+pub fn is_cidr_line(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty() && !line.starts_with('#')
+}
+
 #[derive(Clone, Debug)]
 pub struct HostProbeRecord {
     pub octet: u8,

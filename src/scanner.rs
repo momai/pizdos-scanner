@@ -17,7 +17,7 @@ use crate::scanner::scan_loop::{
     process_subnet_iteration, SubnetIterationCtx, SubnetIterationOutcome,
 };
 use crate::tui::{EventLevel, ScanUi};
-use crate::utils::{save_results_to_file, save_results_to_json, SubnetProbeStats};
+use crate::utils::{save_results_to_file, save_results_to_json, is_cidr_line, SubnetProbeStats};
 
 fn scan_source(scan_name: &str) -> String {
     scan_name
@@ -40,7 +40,11 @@ fn expand_to_24(networks: &[String]) -> anyhow::Result<Vec<Ipv4Network>> {
     let mut expanded = Vec::new();
 
     for network in networks {
+        if !is_cidr_line(network) {
+            continue;
+        }
         let ip_net: Ipv4Network = network
+            .trim()
             .parse()
             .with_context(|| format!("Failed to parse network {}", network))?;
         for subnet in split_ipv4_to_24(ip_net)? {

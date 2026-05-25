@@ -106,6 +106,44 @@ docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 443 --sni example
 docker compose down --remove-orphans
 ```
 
+## Быстрый скан известных хостеров
+
+В репозитории лежат готовые списки CIDR (по одной сети на строку), собранные из анонсируемых префиксов RIPEstat по ASN провайдеров. Сканер сам разворачивает их в `/24`.
+
+| Файл | Провайдер | ASN | ~ /24 |
+| --- | --- | --- | --- |
+| `subnets/yandex-cloud.txt` | Yandex Cloud | AS200350, AS210656, AS215013 | ~847 |
+| `subnets/vk-cloud.txt` | VK Cloud (VK-AS) | AS47764 | ~517 |
+| `subnets/regru.txt` | REG.RU | AS197695 | ~431 |
+| `subnets/timeweb.txt` | Timeweb | AS9123, AS51789 | ~853 |
+| `subnets/selectel.txt` | Selectel | AS50340, AS49505, AS61976 | ~2276 |
+| `subnets/all-known-hosters.txt` | все перечисленные | — | ~4924 |
+
+Перекрывающиеся CIDR (например `/22` и вложенный `/23`) схлопываются при генерации.
+
+Обновить списки из RIPEstat:
+
+```bash
+python3 scripts/update-hoster-subnets.py
+```
+
+### Для бинаря
+
+```bash
+./pizdos-scanner subnets subnets/yandex-cloud.txt
+./pizdos-scanner subnets subnets/vk-cloud.txt
+./pizdos-scanner subnets subnets/regru.txt
+./pizdos-scanner subnets subnets/timeweb.txt
+./pizdos-scanner subnets subnets/selectel.txt
+./pizdos-scanner subnets subnets/all-known-hosters.txt   # все хостеры разом
+```
+
+### Для Docker
+
+```bash
+docker compose run --rm --no-build pizdos-scanner subnets subnets/yandex-cloud.txt
+```
+
 ## Сборка из исходников (Ubuntu/Debian)
 
 Подготовка:

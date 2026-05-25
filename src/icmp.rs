@@ -410,12 +410,7 @@ pub async fn app(config: &Config, task: SubnetScanFile) -> anyhow::Result<()> {
         let mut file = File::open(&task.file_path)?;
         let mut content = String::new();
         file.read_to_string(&mut content)?;
-        content
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(ToString::to_string)
-            .collect::<Vec<String>>()
+        crate::utils::parse_cidr_lines(&content)
     };
 
     let scan_name = if task.file_name.is_empty() {
