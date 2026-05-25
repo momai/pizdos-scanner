@@ -88,9 +88,9 @@ docker compose run --rm --no-build pizdos-scanner test 1.1.1.1 443 --sni example
 docker compose down --remove-orphans
 ```
 
-## Сборка из исходников
+## Сборка из исходников (Ubuntu/Debian)
 
-### Бинарь (Ubuntu/Debian)
+Подготовка:
 
 ```bash
 sudo apt update
@@ -99,7 +99,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-Сборка и установка в `~/.local/bin`:
+Сборка и установка:
 
 ```bash
 ./build.sh
@@ -119,12 +119,11 @@ source ~/.bashrc
 INSTALL_DIR=/usr/local/bin sudo ./build.sh
 ```
 
-### Docker image из исходников
-
+И запустите:
 ```bash
-docker compose build
-docker compose run --rm pizdos-scanner geoip-scan ru
+pizdos-scanner geoip-scan ru
 ```
+
 
 ### ICMP без `sudo` (Linux, `DGRAM`)
 
