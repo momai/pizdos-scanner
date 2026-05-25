@@ -188,23 +188,12 @@ socket_type = "DGRAM"
 geoip_dat_path = "geoip.dat"
 geoip_codes = ["ru"]
 
-ping_type = ["ICMP", "TCP"]
-tcp_ports = [80, 443]
-probe_attempts = 2
-icmp_timeout_ms = 1000
-icmp_retry_delay_ms = 200
-tcp_timeout_ms = 2000
-
-results_dir = "results"
-resume_state_dir = "results/state"
-resume = true
-
-console = "plain" # plain | tui | auto
+console = "auto" # plain | tui | auto
 ```
 
 - `geoip-scan` без аргументов берет коды из `geoip_codes`.
 - Аргументы команды переопределяют конфиг.
-- `console = "plain"` — progress bar (по умолчанию, удобно для Docker).
+- `console = "plain"` — progress bar (удобно для Docker).
 - `console = "tui"` — дашборд для интерактивного локального терминала.
 
 TCP считается живым, если соединение прошло или порт быстро ответил отказом до `tcp_timeout_ms`.
