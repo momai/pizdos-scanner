@@ -1,7 +1,7 @@
 [package]
 name = "pizdos-scanner"
 version = "0.2.2"
-edition = "2026"
+edition = "2024"
 
 [dependencies]
 maxminddb = "0.27.1"
