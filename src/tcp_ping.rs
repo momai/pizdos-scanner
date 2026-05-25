@@ -140,7 +140,7 @@ pub fn probe_tcp_with_optional_sni(
     probe_once(addr, to, network_interface)
 }
 
-fn string_to_ip(address: &String) -> anyhow::Result<IpAddr> {
+pub(crate) fn string_to_ip(address: &String) -> anyhow::Result<IpAddr> {
     let ip: IpAddr = if address.parse::<Ipv4Addr>().is_err() {
         let endpoint_host: String = if !address.contains(":") {
             format!("{}:{}", address, 80)
@@ -160,6 +160,23 @@ fn string_to_ip(address: &String) -> anyhow::Result<IpAddr> {
         address.parse()?
     };
     Ok(ip)
+}
+
+pub fn test_tcp_ping_ip(
+    ip: IpAddr,
+    ports: &[u16],
+    sni_host: Option<&str>,
+    network_interface: Option<&str>,
+    timeout: Duration,
+) -> Vec<(u16, TcpProbeStatus, f64)> {
+    ports
+        .par_iter()
+        .map(|port| {
+            let (status, elapsed_ms) =
+                probe_tcp_with_optional_sni(ip, *port, sni_host, network_interface, timeout);
+            (*port, status, elapsed_ms)
+        })
+        .collect()
 }
 
 pub async fn test_tcp_ping(

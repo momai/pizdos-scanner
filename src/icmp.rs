@@ -1,7 +1,9 @@
 use anyhow::Context;
+use futures::stream::{FuturesUnordered, StreamExt};
 use ipnetwork::Ipv4Network;
 use ping::Ping;
 use rayon::prelude::*;
+use std::sync::Arc;
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -10,6 +12,7 @@ use std::{
     time::Duration,
 };
 use tokio::time::sleep;
+use tokio::sync::Semaphore;
 use colored::*;
 // use futures_util::TryFutureExt;
 use crate::init::{
@@ -389,6 +392,7 @@ pub(crate) async fn process_subnet(
     geoip: Option<&GeoIpService>,
     source: &str,
     fallback_country: Option<&str>,
+    host_probe_semaphore: Arc<Semaphore>,
     tuning: ProbeTuning,
     socket_type: &ConfigSocketType,
     ping_type: &Vec<ConfigPingType>,
@@ -414,35 +418,64 @@ pub(crate) async fn process_subnet(
         .map(|addr| addr.to_string().parse().unwrap())
         .collect();
 
-    // Параллельно проверяем все хосты в подсети
-    let host_results: Vec<HostProbeRecord> = hosts
-        .par_iter()
-        .map(|&ip| {
-            let probe = probe_host(
-                ip,
-                tuning.attempts,
-                tuning.icmp_timeout,
-                tuning.icmp_retry_delay,
-                tuning.tcp_timeout,
-                socket_type,
-                ping_type,
-                tcp_ports,
-                tcp_sni_host,
-                network_interface,
-            );
+    // Единый уровень параллельности: общий semaphore для всех host-probe в скане.
+    let ping_type_shared = Arc::new(ping_type.clone());
+    let tcp_ports_shared = Arc::new(tcp_ports.to_vec());
+    let tcp_sni_host_owned = tcp_sni_host.map(str::to_string);
+    let network_interface_owned = network_interface.map(str::to_string);
+    let mut tasks = FuturesUnordered::new();
+
+    for ip in hosts {
+        let semaphore = Arc::clone(&host_probe_semaphore);
+        let ping_type = Arc::clone(&ping_type_shared);
+        let tcp_ports = Arc::clone(&tcp_ports_shared);
+        let tcp_sni_host = tcp_sni_host_owned.clone();
+        let network_interface = network_interface_owned.clone();
+        let socket_type = socket_type.clone();
+
+        tasks.push(async move {
+            let permit = semaphore
+                .acquire_owned()
+                .await
+                .context("host probe semaphore closed")?;
+
+            let probe = tokio::task::spawn_blocking(move || {
+                let _permit_guard = permit;
+                probe_host(
+                    ip,
+                    tuning.attempts,
+                    tuning.icmp_timeout,
+                    tuning.icmp_retry_delay,
+                    tuning.tcp_timeout,
+                    &socket_type,
+                    &ping_type,
+                    &tcp_ports,
+                    tcp_sni_host.as_deref(),
+                    network_interface.as_deref(),
+                )
+            })
+            .await
+            .context("host probe worker join failed")?;
+
             let octet = match ip {
                 IpAddr::V4(ip) => ip.octets()[3],
                 IpAddr::V6(_) => 0,
             };
-            HostProbeRecord {
+            Ok::<HostProbeRecord, anyhow::Error>(HostProbeRecord {
                 octet,
                 icmp: probe.icmp,
                 tcp_ports: probe.tcp_ports.clone(),
                 tcp_rejected_ports: probe.tcp_rejected_ports.clone(),
                 tcp_alive: probe.tcp_alive(),
-            }
-        })
-        .collect();
+            })
+        });
+    }
+
+    let mut host_results = Vec::with_capacity(254);
+    while let Some(row) = tasks.next().await {
+        host_results.push(row?);
+    }
+    host_results.sort_by_key(|host| host.octet);
 
     let mut tcp_port_alive = BTreeMap::new();
     let mut tcp_port_rejected = BTreeMap::new();

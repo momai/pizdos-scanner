@@ -1,7 +1,8 @@
 use colored::*;
 use ipnetwork::Ipv4Network;
-use std::{collections::HashSet, path::Path};
+use std::{collections::HashSet, path::Path, sync::Arc};
 use tokio::time::Instant;
+use tokio::sync::Semaphore;
 
 use crate::geoip::{GeoIpService, SubnetInfo};
 use crate::icmp::{process_subnet, ProbeTuning};
@@ -11,7 +12,7 @@ use crate::scanner::scan_conditions::{
     check_endpoint_with_retries, graceful_stop_on_available, handle_endpoint_failure,
     handle_periodic_stop_action, probe_stop_target, StopProbeResult, StopTargetChecker,
 };
-use crate::tui::ScanUi;
+use crate::tui::{EventLevel, ScanUi};
 use crate::utils::{
     append_result_to_csv, append_result_to_jsonl, append_result_to_txt_lists, SubnetProbeStats,
 };
@@ -45,6 +46,7 @@ pub(crate) struct SubnetIterationCtx<'a> {
     pub(crate) state_path: &'a Path,
     pub(crate) state: &'a mut ScanState,
     pub(crate) stop_checker: &'a mut Option<StopTargetChecker>,
+    pub(crate) host_probe_semaphore: &'a Arc<Semaphore>,
     pub(crate) ui: &'a mut Option<ScanUi>,
     pub(crate) scan_progress: &'a ScanProgress,
     pub(crate) completed_subnets: &'a mut HashSet<String>,
@@ -72,6 +74,7 @@ pub(crate) async fn process_subnet_iteration(
         state_path,
         state,
         stop_checker,
+        host_probe_semaphore,
         ui,
         scan_progress,
         completed_subnets,
@@ -118,6 +121,7 @@ pub(crate) async fn process_subnet_iteration(
         geoip,
         source,
         fallback_country,
+        Arc::clone(host_probe_semaphore),
         ProbeTuning::from_config(config),
         config.socket_type.as_ref().unwrap(),
         &config.ping_type,
@@ -159,6 +163,22 @@ pub(crate) async fn process_subnet_iteration(
                     }
                     StopProbeResult::ContinueUnavailable => {}
                 }
+            }
+
+            let (endpoint_available, endpoint_interrupted) =
+                check_endpoint_with_retries(endpoint, socket_type, network_interface, ui.as_ref()).await;
+            if endpoint_interrupted {
+                return Ok(SubnetIterationOutcome::Interrupted);
+            }
+            if !endpoint_available {
+                handle_endpoint_failure(config, endpoint, network_interface, state_path, state, ui).await?;
+                if let Some(ui) = ui.as_ref() {
+                    ui.log(
+                        EventLevel::Wrn,
+                        format!("discarded {subnet_string}: endpoint became unavailable"),
+                    );
+                }
+                return Ok(SubnetIterationOutcome::Continue);
             }
 
             if let Some(ui) = ui.as_ref() {
@@ -206,16 +226,6 @@ pub(crate) async fn process_subnet_iteration(
     }
 
     save_state_snapshot(state_path, state, completed_subnets, failed_subnets)?;
-
-    let (endpoint_available, endpoint_interrupted) =
-        check_endpoint_with_retries(endpoint, socket_type, network_interface, ui.as_ref()).await;
-    if endpoint_interrupted {
-        return Ok(SubnetIterationOutcome::Interrupted);
-    }
-
-    if !endpoint_available {
-        handle_endpoint_failure(config, endpoint, network_interface, state_path, state, ui).await?;
-    }
 
     if stop_every != 0 && state.subnet24_count % stop_every == 0 {
         handle_periodic_stop_action(config, ui.as_ref()).await?;

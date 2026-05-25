@@ -25,6 +25,15 @@ pub fn is_cidr_line(line: &str) -> bool {
     !line.is_empty() && !line.starts_with('#')
 }
 
+pub fn parse_ip_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(ToString::to_string)
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct HostProbeRecord {
     pub octet: u8,
@@ -51,6 +60,8 @@ struct JsonlSubnetRecord {
 
 #[derive(Deserialize)]
 struct JsonlCompactProbeRecord {
+    #[serde(default)]
+    icmp: Vec<String>,
     tcp_ports: BTreeMap<u16, Vec<String>>,
     #[serde(default)]
     tcp_rejected: BTreeMap<u16, Vec<String>>,
@@ -414,6 +425,17 @@ fn collect_ips_from_probe(record: &JsonlSubnetRecord) -> anyhow::Result<(BTreeSe
     Ok((alive, rejected))
 }
 
+fn collect_icmp_ips_from_probe(record: &JsonlSubnetRecord) -> anyhow::Result<BTreeSet<Ipv4Addr>> {
+    let subnet: Ipv4Network = record.subnet.parse()?;
+    let mut icmp = BTreeSet::new();
+    for range in &record.probe.icmp {
+        for octet in expand_octet_range(range)? {
+            icmp.insert(ipv4_from_octet(subnet, octet));
+        }
+    }
+    Ok(icmp)
+}
+
 pub fn append_result_to_txt_lists(
     result: &(Ipv4Network, SubnetInfo, SubnetProbeStats),
     alive_filename: &str,
@@ -464,6 +486,25 @@ pub fn write_final_ip_lists_from_jsonl(jsonl_filename: &str) -> anyhow::Result<(
     write_ip_set(&rejected_filename, &rejected)?;
 
     Ok((alive_filename, rejected_filename, alive.len(), rejected.len()))
+}
+
+pub fn write_icmp_ip_list_from_jsonl(jsonl_filename: &str) -> anyhow::Result<(String, usize)> {
+    let icmp_filename = result_txt_path(jsonl_filename, "icmp_alive")?;
+    let file = File::open(jsonl_filename)?;
+    let reader = BufReader::new(file);
+    let mut icmp = BTreeSet::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: JsonlSubnetRecord = serde_json::from_str(&line)?;
+        icmp.extend(collect_icmp_ips_from_probe(&record)?);
+    }
+
+    write_ip_set(&icmp_filename, &icmp)?;
+    Ok((icmp_filename, icmp.len()))
 }
 
 pub async fn change_ip(url: &str) -> anyhow::Result<()> {

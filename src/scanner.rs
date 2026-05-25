@@ -1,10 +1,12 @@
 mod scan_conditions;
 mod scan_loop;
+mod parallel;
 
 use anyhow::Context;
 use colored::*;
 use ipnetwork::Ipv4Network;
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::Semaphore;
 
 use crate::geoip::{GeoIpService, SubnetInfo};
 use crate::icmp::{probe_host, split_ipv4_to_24, ProbeTuning};
@@ -16,8 +18,9 @@ use crate::scanner::scan_conditions::{init_scan_ui, StopTargetChecker};
 use crate::scanner::scan_loop::{
     process_subnet_iteration, SubnetIterationCtx, SubnetIterationOutcome,
 };
+use crate::scanner::parallel::run_parallel_subnets;
 use crate::tui::{EventLevel, ScanUi};
-use crate::utils::{save_results_to_file, save_results_to_json, is_cidr_line, SubnetProbeStats};
+use crate::utils::{is_cidr_line, save_results_to_file, save_results_to_json, SubnetProbeStats};
 
 fn scan_source(scan_name: &str) -> String {
     scan_name
@@ -147,6 +150,7 @@ pub async fn scan_networks(
         .filter(|stop| stop.is_active())
         .cloned()
         .map(StopTargetChecker::new);
+    let subnet_parallelism = config.subnet_parallelism();
 
     let whitelist_label = stop_checker.as_ref().map(|c| c.label());
     let mut ui: Option<ScanUi> = init_scan_ui(
@@ -166,49 +170,112 @@ pub async fn scan_networks(
 
     let mut scanned_this_run = 0usize;
     let mut interrupted = false;
+    let host_probe_limit = config.host_probe_parallelism();
+    let host_probe_semaphore = Arc::new(Semaphore::new(host_probe_limit));
     let scan_progress = ScanProgress::new(ui.is_none(), all_subnets.len(), completed_subnets.len());
-
-    for (index, subnet24) in all_subnets.iter().enumerate() {
-        if ui.as_ref().is_some_and(ScanUi::cancelled) {
-            interrupted = true;
-            break;
+    if let Some(ui) = ui.as_ref() {
+        let mode = if config.host_probe_parallelism.is_some() {
+            "manual"
+        } else {
+            "auto"
+        };
+        ui.log(
+            EventLevel::Inf,
+            format!("Host-probe limit: {host_probe_limit} ({mode})"),
+        );
+    } else {
+        let mode = if config.host_probe_parallelism.is_some() {
+            "manual"
+        } else {
+            "auto"
+        };
+        println!(
+            "{}",
+            format!("host-probe limit: {host_probe_limit} ({mode})").dimmed()
+        );
+    }
+    if subnet_parallelism > 1 {
+        if let Some(ui) = ui.as_ref() {
+            ui.log(
+                EventLevel::Inf,
+                format!("Subnet parallelism: {subnet_parallelism} workers"),
+            );
+        } else {
+            println!("{}", format!("parallel mode: {subnet_parallelism} /24 workers").cyan());
         }
-
-        if completed_subnets.contains(&subnet24.to_string()) {
-            continue;
-        }
-
-        match process_subnet_iteration(SubnetIterationCtx {
+        match run_parallel_subnets(
             config,
-            subnet24: *subnet24,
-            index,
-            geoip: geoip.as_ref(),
-            source: &source,
-            fallback_country: fallback_country.as_deref(),
-            tcp_ports: &tcp_ports,
-            tcp_sni_host,
-            network_interface,
-            endpoint: &endpoint,
-            socket_type,
-            state_path: &state_path,
-            state: &mut state,
-            stop_checker: &mut stop_checker,
-            ui: &mut ui,
-            scan_progress: &scan_progress,
-            completed_subnets: &mut completed_subnets,
-            failed_subnets: &mut failed_subnets,
-            processed_networks: &mut processed_networks,
-            scanned_this_run: &mut scanned_this_run,
+            &all_subnets,
+            geoip.clone(),
+            source.clone(),
+            fallback_country.clone(),
+            tcp_ports.clone(),
+            tcp_sni_host.map(|s| s.to_string()),
+            network_interface.map(|s| s.to_string()),
+            socket_type.clone(),
+            ProbeTuning::from_config(config),
+            &state_path,
+            &mut state,
+            &mut ui,
+            &mut stop_checker,
+            Arc::clone(&host_probe_semaphore),
+            &scan_progress,
+            &mut completed_subnets,
+            &mut failed_subnets,
+            &mut processed_networks,
+            &mut scanned_this_run,
             stop_every,
-        })
+        )
         .await?
         {
             SubnetIterationOutcome::Continue => {}
-            SubnetIterationOutcome::Interrupted => {
+            SubnetIterationOutcome::Interrupted => interrupted = true,
+            SubnetIterationOutcome::Stopped => return Ok(()),
+        }
+    } else {
+        for (index, subnet24) in all_subnets.iter().enumerate() {
+            if ui.as_ref().is_some_and(ScanUi::cancelled) {
                 interrupted = true;
                 break;
             }
-            SubnetIterationOutcome::Stopped => return Ok(()),
+
+            if completed_subnets.contains(&subnet24.to_string()) {
+                continue;
+            }
+
+            match process_subnet_iteration(SubnetIterationCtx {
+                config,
+                subnet24: *subnet24,
+                index,
+                geoip: geoip.as_ref(),
+                source: &source,
+                fallback_country: fallback_country.as_deref(),
+                tcp_ports: &tcp_ports,
+                tcp_sni_host,
+                network_interface,
+                endpoint: &endpoint,
+                socket_type,
+                state_path: &state_path,
+                state: &mut state,
+                stop_checker: &mut stop_checker,
+                host_probe_semaphore: &host_probe_semaphore,
+                ui: &mut ui,
+                scan_progress: &scan_progress,
+                completed_subnets: &mut completed_subnets,
+                failed_subnets: &mut failed_subnets,
+                processed_networks: &mut processed_networks,
+                scanned_this_run: &mut scanned_this_run,
+                stop_every,
+            })
+            .await?
+            {
+                SubnetIterationOutcome::Continue => {}
+                SubnetIterationOutcome::Interrupted => {
+                    interrupted = true;
+                    break;
+                }
+                SubnetIterationOutcome::Stopped => return Ok(()),
+            }
         }
     }
 

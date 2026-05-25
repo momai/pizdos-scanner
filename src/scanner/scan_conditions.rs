@@ -199,6 +199,7 @@ pub(crate) fn init_scan_ui(
             tcp_ports: tcp_ports.to_vec(),
             socket_type: format!("{socket_type:?}"),
             ping_types: ping_types_label(&config.ping_type),
+            subnet_parallelism: config.subnet_parallelism(),
             result_jsonl: state.result_jsonl.clone(),
             last_stop: state.stopped_reason.clone(),
         };

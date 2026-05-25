@@ -85,6 +85,7 @@ pub struct ScanUiConfig {
     pub tcp_ports: Vec<u16>,
     pub socket_type: String,
     pub ping_types: Vec<String>,
+    pub subnet_parallelism: usize,
     pub result_jsonl: String,
     pub last_stop: Option<String>,
 }
@@ -152,7 +153,8 @@ struct ScanDashboard {
     tcp_hosts_total: usize,
     rejected_hosts_total: usize,
     errors: usize,
-    current: Option<(SubnetRow, Instant)>,
+    inflight: Vec<(SubnetRow, Instant)>,
+    inflight_subnets: usize,
     recent: VecDeque<SubnetRow>,
     events: VecDeque<EventLine>,
     whitelist_status: String,
@@ -232,21 +234,30 @@ impl ScanDashboard {
     }
 
     fn set_scanning(&mut self, index: usize, subnet: &str) {
-        let row = SubnetRow {
-            index,
-            total: self.config.total_subnets,
-            subnet: subnet.to_string(),
-            icmp: 0,
-            tcp: 0,
-            rejected: 0,
-            seconds: 0.0,
-            status: SubnetStatus::Scanning,
-        };
-        self.current = Some((row, Instant::now()));
+        if let Some((row, _)) = self.inflight.iter_mut().find(|(row, _)| row.subnet == subnet) {
+            row.index = index;
+            row.total = self.config.total_subnets;
+            row.status = SubnetStatus::Scanning;
+            return;
+        }
+        self.inflight.push((
+            SubnetRow {
+                index,
+                total: self.config.total_subnets,
+                subnet: subnet.to_string(),
+                icmp: 0,
+                tcp: 0,
+                rejected: 0,
+                seconds: 0.0,
+                status: SubnetStatus::Scanning,
+            },
+            Instant::now(),
+        ));
+        self.inflight_subnets = self.inflight.len();
     }
 
     fn tick_current(&mut self) {
-        if let Some((row, started)) = &mut self.current {
+        for (row, started) in &mut self.inflight {
             row.seconds = started.elapsed().as_secs_f64();
         }
     }
@@ -295,7 +306,14 @@ impl ScanDashboard {
             status,
         };
 
-        self.current = None;
+        if let Some(pos) = self
+            .inflight
+            .iter()
+            .position(|(row, _)| row.subnet == subnet)
+        {
+            self.inflight.swap_remove(pos);
+        }
+        self.inflight_subnets = self.inflight.len();
         self.recent.push_front(row);
         while self.recent.len() > MAX_RECENT {
             self.recent.pop_back();
@@ -320,11 +338,7 @@ impl ScanDashboard {
     }
 
     fn progress_position(&self) -> usize {
-        if let Some((row, _)) = &self.current {
-            row.index
-        } else {
-            self.scanned_total
-        }
+        (self.scanned_total + self.inflight.len()).min(self.config.total_subnets)
     }
 
     fn progress_ratio(&self) -> f64 {
@@ -388,6 +402,7 @@ impl Default for ScanDashboard {
                 tcp_ports: vec![],
                 socket_type: String::new(),
                 ping_types: vec![],
+                subnet_parallelism: 1,
                 result_jsonl: String::new(),
                 last_stop: None,
             },
@@ -401,7 +416,8 @@ impl Default for ScanDashboard {
             tcp_hosts_total: 0,
             rejected_hosts_total: 0,
             errors: 0,
-            current: None,
+            inflight: Vec::new(),
+            inflight_subnets: 0,
             recent: VecDeque::new(),
             events: VecDeque::new(),
             whitelist_status: String::new(),
@@ -478,6 +494,12 @@ impl ScanUi {
     pub fn set_scanning(&self, index: usize, subnet: &str) {
         if let Ok(mut dash) = self.state.lock() {
             dash.set_scanning(index, subnet);
+        }
+    }
+
+    pub fn set_inflight_subnets(&self, count: usize) {
+        if let Ok(mut dash) = self.state.lock() {
+            dash.inflight_subnets = count;
         }
     }
 
@@ -721,7 +743,7 @@ fn render_stats(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
 
     let bar_width = chunks[1].width.saturating_sub(2) as usize;
     let (bar, _) = subnet_progress_bar(done, total, bar_width.max(20));
-    let scanning = dash.current.is_some();
+    let scanning = !dash.inflight.is_empty();
     let status = if scanning { " ▶" } else { "" };
     let stopping = if dash.stopping {
         "  ⏳ Остановка сканирования, ждите…"
@@ -780,8 +802,10 @@ fn render_recent(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
         .height(1);
 
     let mut rows: Vec<Row> = Vec::new();
-    if let Some((current, _)) = &dash.current {
-        rows.push(subnet_row(current));
+    let mut inflight_rows: Vec<&SubnetRow> = dash.inflight.iter().map(|(row, _)| row).collect();
+    inflight_rows.sort_by_key(|row| std::cmp::Reverse(row.index));
+    for row in inflight_rows {
+        rows.push(subnet_row(row));
     }
     for row in &dash.recent {
         rows.push(subnet_row(row));
@@ -914,6 +938,13 @@ fn render_side(frame: &mut Frame, area: Rect, dash: &ScanDashboard) {
                 "{} · {} · ports {ports}",
                 dash.config.ping_types.join("+"),
                 dash.config.socket_type,
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("Workers    ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!(
+                "{}/{}",
+                dash.inflight_subnets, dash.config.subnet_parallelism
             )),
         ]),
         Line::from(vec![

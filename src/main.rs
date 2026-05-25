@@ -9,21 +9,15 @@ mod scanner;
 mod tcp_ping;
 mod xray_geoip;
 mod tui;
+mod commands;
 
 use anyhow::Result;
-use colored::Colorize;
-use std::path::Path;
-use std::time::Duration;
 use clap::{
     Parser,
     Subcommand,
 };
-use tokio::time::sleep;
-use crate::ipinfo::get_providers_info;
-use crate::init::{Config, ConfigSocketType};
-use crate::icmp::{app, ping_subnet_matrix_rayon, scan_networks, ProbeTuning, SubnetScanFile};
-use crate::geoip::download_dbs;
-use crate::utils::{get_current_ip, write_final_ip_lists_from_jsonl};
+use crate::commands::{finalize, net, scan, tcp_scan_file};
+use crate::init::Config;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -33,6 +27,9 @@ use crate::utils::{get_current_ip, write_final_ip_lists_from_jsonl};
   pizdos-scanner geoip-list
   pizdos-scanner geoip-scan ru
   pizdos-scanner subnets subnets.txt
+  pizdos-scanner icmp-fast geoip-scan ru
+  pizdos-scanner icmp-fast subnets subnets.txt
+  pizdos-scanner tcp-scan-file results/<scan>_icmp_alive.txt 443
   pizdos-scanner subnet 1.1.1.1
   pizdos-scanner test 1.1.1.1 80 443
 
@@ -107,6 +104,29 @@ enum Command {
         #[arg(value_name = "jsonl_file")]
         jsonl_file: String,
     },
+    /// Fast ICMP-only scan + build *_icmp_alive.txt
+    IcmpFast {
+        /// Source selector:
+        /// - empty: use `subnets` from config.toml
+        /// - <file>: read CIDR list from file
+        /// - geoip-scan <codes...>: load CIDR from geoip.dat codes
+        /// - geoip <codes...>: same as geoip-scan
+        /// - subnets [file]: from config or file
+        #[arg(value_name = "source_or_file")]
+        args: Vec<String>,
+    },
+    /// TCP scan list of IPs from file
+    TcpScanFile {
+        /// File with IP list, one IP per line
+        #[arg(value_name = "ips_file")]
+        ips_file: String,
+        /// Ports to test
+        #[arg(value_name = "ports")]
+        ports: Vec<u16>,
+        /// SNI host for TLS probe
+        #[arg(long)]
+        sni: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -134,165 +154,42 @@ async fn main() -> Result<()> {
     let config: Config = Config::load(config_path)?;
 
     if args.update {
-        download_dbs(&config).await?;
+        scan::run_update(&config).await?;
     }
 
     match args.command {
         Some(Command::Subnets { scan_file }) => {
-
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(500)
-                .build_global()?;
-
-            match scan_file {
-                Some(file_path) => {
-
-                    let path = Path::new(&file_path);
-                    let task = SubnetScanFile {
-                        file_name: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
-                        file_path: file_path.clone()
-                    };
-                    app(&config, task).await?;
-                },
-                None => {
-                    let task = SubnetScanFile {
-                        file_name: String::new(),
-                        file_path: String::new()
-                    };
-                    app(&config, task).await?;
-                }
-            };
+            scan::run_subnets(&config, scan_file).await?;
         },
         Some(Command::Subnet { ip, subcommand }) => {
-
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(500)
-                .build_global()?;
-
-            let tcp_ports = config.tcp_ports();
-            let ip = ping_subnet_matrix_rayon(
-                ip.as_str(),
-                ProbeTuning::from_config(&config),
-                &config.socket_type.as_ref().unwrap(),
-                &config.ping_type,
-                &tcp_ports,
-                config.tcp_sni_host.as_deref(),
-                config.network_interface(),
-            ).await?;
-
-            match subcommand {
-                Some(SubnetSubCommand::Full) => {
-                    get_providers_info(&config, &ip).await?;
-                },
-                None => {}
-            }
+            scan::run_subnet(&config, ip, matches!(subcommand, Some(SubnetSubCommand::Full))).await?;
         },
         Some(Command::Myip) => {
-            let ip = get_current_ip().await;
-            match ip {
-                Ok(ip) => println!("current ip: {}", ip),
-                Err(e) => println!("ERR {}", e),
-            }
+            net::run_myip().await?;
         },
         Some(Command::Info { ip }) => {
-            get_providers_info(&config, &ip).await?;
-
-            let ip_parsed: std::net::IpAddr = ip.parse()?;
-
-            let hostname = dns_lookup::lookup_addr(&ip_parsed.clone()).unwrap_or_else(|_| "None".to_string());
-            println!("PTR for {} - {}", ip, hostname);
-
-            let socket = match &config.socket_type {
-                Some(ConfigSocketType::DGRAM) => ping::DGRAM,
-                Some(ConfigSocketType::RAW) => ping::RAW,
-                None => ping::DGRAM,
-            };
-
-            let mut pings: Vec<Duration> = vec![];
-
-            for _ in 0..3 {
-                let mut ping = ping::new(ip_parsed);
-                ping.socket_type(socket).timeout(Duration::from_secs(1));
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                if let Some(network_interface) = config.network_interface() {
-                    ping.bind_device(network_interface);
-                }
-
-                match ping.send() {
-                    Ok(r) => {
-                        pings.push(r.rtt);
-                    },
-                    Err(_e) => { },
-                }
-                sleep(Duration::from_millis(300)).await
-            }
-
-            println!("PING for {} - {:?}", ip_parsed, pings);
-
+            net::run_info(&config, ip).await?;
         },
         Some(Command::Test { ip, ports, sni }) => {
-            if ip.is_some() && ports.is_some() {
-                tcp_ping::test_tcp_ping(
-                    &String::from(ip.unwrap()),
-                    &ports.unwrap(),
-                    sni.as_deref(),
-                    config.network_interface(),
-                ).await?;
-            } else {
-                println!("Please specify ip and ports");
-            }
+            net::run_test(&config, ip, ports, sni).await?;
         },
         Some(Command::GeoipList) => {
-            let codes = xray_geoip::list_codes(config.geoip_dat_path())?;
-            println!("{:<24} {:>10} {:>10} {:>10}", "code", "cidr", "ipv4", "ipv6");
-            println!("{}", "-".repeat(60));
-            for code in codes {
-                println!(
-                    "{:<24} {:>10} {:>10} {:>10}",
-                    code.code, code.cidr_count, code.ipv4_count, code.ipv6_count
-                );
-            }
+            scan::run_geoip_list(&config)?;
         },
         Some(Command::GeoipScan { codes }) => {
+            scan::run_geoip_scan(&config, codes).await?;
+        },
+        Some(Command::Finalize { jsonl_file }) => {
+            finalize::run_finalize(jsonl_file)?;
+        },
+        Some(Command::IcmpFast { args }) => {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(500)
                 .build_global()?;
-
-            let codes = if codes.is_empty() {
-                config.geoip_codes()
-            } else {
-                codes
-            };
-
-            if codes.is_empty() {
-                anyhow::bail!("geoip_codes is empty; set it in config or pass codes to geoip-scan");
-            }
-
-            let loaded = xray_geoip::load_ipv4_cidrs(config.geoip_dat_path(), &codes)?;
-            if loaded.matched_codes.is_empty() {
-                anyhow::bail!("No matching geoip codes found: {:?}", codes);
-            }
-
-            println!(
-                "{}",
-                format!(
-                    "loaded {} IPv4 CIDR from {:?}, skipped IPv6 {}",
-                    loaded.networks.len(),
-                    loaded.matched_codes,
-                    loaded.skipped_ipv6
-                )
-                .cyan()
-            );
-
-            let networks = loaded.networks.iter().map(ToString::to_string).collect();
-            let scan_name = format!("geoip_{}", loaded.matched_codes.join("_").to_lowercase());
-            scan_networks(&config, &scan_name, networks).await?;
+            commands::icmp_fast::run_icmp_fast(&config, &args).await?;
         },
-        Some(Command::Finalize { jsonl_file }) => {
-            let (alive_file, rejected_file, alive_count, rejected_count) =
-                write_final_ip_lists_from_jsonl(&jsonl_file)?;
-            println!("Alive IPs: {} -> {}", alive_count, alive_file);
-            println!("Rejected IPs: {} -> {}", rejected_count, rejected_file);
+        Some(Command::TcpScanFile { ips_file, ports, sni }) => {
+            tcp_scan_file::run_tcp_scan_file(&config, ips_file, ports, sni)?;
         },
         None => {
 

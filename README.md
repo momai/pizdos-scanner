@@ -82,6 +82,9 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 ./pizdos-scanner geoip-scan cn private telegram     # скан нескольких групп
 ./pizdos-scanner subnets                            # скан CIDR из config.toml
 ./pizdos-scanner subnets subnets.txt                # скан CIDR из файла
+./pizdos-scanner icmp-fast geoip-scan ru            # быстрый ICMP-only по geoip.dat code
+./pizdos-scanner icmp-fast subnets subnets.txt      # быстрый ICMP-only из файла CIDR
+./pizdos-scanner tcp-scan-file results/<scan>_icmp_alive.txt 443  # TCP-проверка списка IP
 ./pizdos-scanner subnet 1.1.1.1                     # скан одной /24 по любому IP внутри неё
 ./pizdos-scanner finalize results/<scan>.jsonl      # пересобрать *_alive.txt и *_rejected.txt
 ./pizdos-scanner test 1.1.1.1 80 443                # TCP-проверка IP/портов
@@ -189,6 +192,7 @@ geoip_dat_path = "geoip.dat"
 geoip_codes = ["ru"]
 
 console = "auto" # plain | tui | auto
+subnet_parallelism = 1 # /24 workers in parallel (1 = sequential)
 ```
 
 - `geoip-scan` без аргументов берет коды из `geoip_codes`.
@@ -221,6 +225,21 @@ icmp_timeout_ms = 800     # timeout одного ICMP
 icmp_retry_delay_ms = 100 # пауза между ICMP попытками
 tcp_timeout_ms = 1200     # timeout одного TCP подключения
 ```
+
+Параллельность скана по `/24`:
+
+```toml
+subnet_parallelism = 1       # число /24 worker'ов
+# host_probe_parallelism = 500 # опционально: ручной override
+
+```
+
+- При `subnet_parallelism > 1` несколько `/24` обрабатываются одновременно.
+- `host_probe_parallelism` — единый semaphore-лимит ICMP/TCP probe на весь скан (один уровень параллельности).
+- Если `host_probe_parallelism` не задан, сканер подбирает его автоматически от `subnet_parallelism`.
+- Для аккуратного разгона увеличивайте постепенно: `2 -> 4 -> 8`.
+- `endpoint` и `[stop_on_available]` продолжают проверяться и в параллельном режиме:
+  сканер останавливает запуск новых задач и корректно завершает/прерывает текущий пул при срабатывании условия остановки.
 
 ### Результаты и resume
 

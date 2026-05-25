@@ -32,6 +32,8 @@ pub struct Config {
     pub socket_type: Option<ConfigSocketType>,
     #[serde(default = "default_ping_type")]
     pub ping_type: Vec<ConfigPingType>,
+    pub subnet_parallelism: Option<usize>,
+    pub host_probe_parallelism: Option<usize>,
     pub probe_attempts: Option<u8>,
     pub icmp_timeout_ms: Option<u64>,
     pub icmp_retry_delay_ms: Option<u64>,
@@ -205,6 +207,21 @@ impl Config {
 
     pub fn probe_attempts(&self) -> u8 {
         self.probe_attempts.unwrap_or(2).max(1)
+    }
+
+    pub fn subnet_parallelism(&self) -> usize {
+        self.subnet_parallelism.unwrap_or(1).max(1)
+    }
+
+    pub fn host_probe_parallelism(&self) -> usize {
+        if let Some(limit) = self.host_probe_parallelism {
+            return limit.max(1);
+        }
+
+        // Автоподбор: при 1 /24 держим ~полную волну хостов,
+        // при росте subnet_parallelism поднимаем лимит умеренно.
+        let auto = self.subnet_parallelism().saturating_mul(96);
+        auto.max(254).min(1200)
     }
 
     pub fn icmp_timeout(&self) -> Duration {
