@@ -11,23 +11,25 @@ ICMP используется как дополнительный сигнал, 
 
 Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
 
-Скачайте конфиг, исполняемые файл и geoip файл. 
-```bash
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64) ASSET="pizdos-scanner-linux-x86_64" ;;
-  aarch64|arm64) ASSET="pizdos-scanner-linux-arm64" ;;
-  *)
-    echo "Unsupported architecture: $ARCH"
-    echo "Use Docker or build from sources"
-    exit 1
-    ;;
-esac
+Скачайте бинарь под вашу архитектуру:
+- `x86_64`: `pizdos-scanner-linux-x86_64`
+- `arm64` (Raspberry Pi 64-bit): `pizdos-scanner-linux-arm64`
 
+```bash
+# x86_64
 curl -L -o pizdos-scanner \
-  "https://github.com/momai/pizdos-scanner/releases/latest/download/${ASSET}"
+  https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-x86_64
+```
+```bash
+# arm64 (Raspberry Pi 64-bit) 
+ curl -L -o pizdos-scanner \
+  https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-arm64
+```
+
+Скачайте геофайл и конфиг
+```bash
 curl -L -o geoip.dat \
-  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat  
+  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 curl -L -o config.toml \
   https://raw.githubusercontent.com/momai/pizdos-scanner/main/config.toml
 chmod +x pizdos-scanner
