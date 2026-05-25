@@ -58,7 +58,7 @@ jobs:
   build-binary:
     name: Build release binary
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -110,6 +110,7 @@ jobs:
 
             - Docker: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
             - Binary: `pizdos-scanner-linux-x86_64` and `.tar.gz` attached to this release.
+            - Binary builder base: `ubuntu-22.04` (improves glibc compatibility).
 
             ## Run binary
 

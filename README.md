@@ -9,25 +9,25 @@ ICMP используется как дополнительный сигнал, 
 
 ### Из бинаря
 
-1) Скачайте бинарь из latest release:
-- [pizdos-scanner-linux-x86_64](https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-x86_64)
-- страница релизов: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
-
-2) Сделайте исполняемым и переименуйте:
+Latest release: [github.com/momai/pizdos-scanner/releases/latest](https://github.com/momai/pizdos-scanner/releases/latest)
 
 ```bash
-chmod +x pizdos-scanner-linux-x86_64
-mv pizdos-scanner-linux-x86_64 pizdos-scanner
-```
+curl -L -o pizdos-scanner \
+  https://github.com/momai/pizdos-scanner/releases/latest/download/pizdos-scanner-linux-x86_64
+chmod +x pizdos-scanner
 
-3) Скачайте `geoip.dat` и запустите скан:
-
-```bash
+mkdir -p db
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+curl -L -o db/GeoLite2-City.mmdb \
+  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
+curl -L -o db/GeoLite2-ASN.mmdb \
+  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
 
 ./pizdos-scanner geoip-scan ru
 ```
+
+Если видите ошибку вида `GLIBC_2.38/2.39 not found`, используйте Docker-раздел ниже или соберите бинарь из исходников на своей машине (раздел `Сборка из исходников`).
 
 ### Из Docker
 
@@ -36,8 +36,13 @@ git clone https://github.com/momai/pizdos-scanner
 cd pizdos-scanner
 
 docker compose pull
+mkdir -p db
 curl -L -o geoip.dat \
   https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+curl -L -o db/GeoLite2-City.mmdb \
+  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
+curl -L -o db/GeoLite2-ASN.mmdb \
+  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
 
 docker compose run --rm pizdos-scanner geoip-scan ru
 ```
