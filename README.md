@@ -179,6 +179,7 @@ socket_type = "DGRAM"
 
 В Docker используется `network_mode: host`, capability `NET_RAW` и RAW-сокеты.
 
+
 ## Конфигурация (`config.toml`)
 
 Основные параметры:
