@@ -115,15 +115,6 @@ fn ranges_from_octets(octets: impl Iterator<Item = u8>) -> Vec<String> {
     ranges
 }
 
-pub fn tcp_port_summary(stats: &SubnetProbeStats) -> String {
-    stats
-        .tcp_port_alive
-        .iter()
-        .map(|(port, count)| format!("{port}:{count}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 fn tcp_port_columns(results: &[(Ipv4Network, SubnetInfo, SubnetProbeStats)]) -> Vec<u16> {
     let mut ports = BTreeMap::new();
     for (_, _, stats) in results {

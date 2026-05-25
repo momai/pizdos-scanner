@@ -13,7 +13,13 @@ use std::{
 use tokio::time::{sleep, Instant};
 use colored::*;
 // use futures_util::TryFutureExt;
-use crate::init::{Config, ConfigSocketType, ConfigSaveResultFileType, ConfigPingType};
+use crate::init::{
+    Config,
+    ConfigSocketType,
+    ConfigSaveResultFileType,
+    ConfigPingType,
+    StopOnAvailableConfig,
+};
 use crate::geoip::{GeoIpService, SubnetInfo};
 use crate::utils::{
     append_result_to_csv,
@@ -22,7 +28,6 @@ use crate::utils::{
     HostProbeRecord,
     save_results_to_file,
     save_results_to_json,
-    tcp_port_summary,
     SubnetProbeStats,
 };
 use crate::tcp_ping::TcpProbeStatus;
@@ -50,10 +55,6 @@ fn tcp_ports_with_443(tcp_ports: &[u16]) -> Vec<u16> {
     ports.sort_unstable();
     ports.dedup();
     ports
-}
-
-fn log_time() -> String {
-    format!("[{}]", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))
 }
 
 pub async fn ping_subnet_matrix_rayon(
@@ -324,6 +325,119 @@ fn ping_endpoint(
     ping_host_icmp_only(ip, attempts, socket_type, network_interface)
 }
 
+fn resolve_stop_target(target: &str, port: u16) -> anyhow::Result<IpAddr> {
+    if let Ok(ip) = target.parse::<IpAddr>() {
+        return Ok(ip);
+    }
+
+    let lookup = if target.contains(':') {
+        target.to_string()
+    } else {
+        format!("{target}:{port}")
+    };
+    let addrs: Vec<_> = lookup
+        .to_socket_addrs()
+        .with_context(|| format!("Failed to resolve stop_on_available target {target}"))?
+        .collect();
+    addrs
+        .first()
+        .map(|addr| addr.ip())
+        .context(format!("No addresses resolved for stop_on_available target {target}"))
+}
+
+struct StopTargetChecker {
+    stop: StopOnAvailableConfig,
+    resolved_ip: Option<IpAddr>,
+    resolve_error_logged: bool,
+}
+
+impl StopTargetChecker {
+    fn new(stop: StopOnAvailableConfig) -> Self {
+        Self {
+            stop,
+            resolved_ip: None,
+            resolve_error_logged: false,
+        }
+    }
+
+    fn label(&self) -> String {
+        stop_on_available_label(&self.stop)
+    }
+
+    fn is_available(&mut self, network_interface: Option<&str>) -> bool {
+        if self.resolved_ip.is_none() {
+            match resolve_stop_target(&self.stop.target, self.stop.port) {
+                Ok(ip) => self.resolved_ip = Some(ip),
+                Err(error) => {
+                    if !self.resolve_error_logged {
+                        eprintln!(
+                            "{}",
+                            format!(
+                                "whitelist probe: cannot resolve {} ({error})",
+                                self.stop.target
+                            )
+                            .yellow()
+                        );
+                        self.resolve_error_logged = true;
+                    }
+                    return false;
+                }
+            }
+        }
+
+        let ip = self.resolved_ip.expect("resolved above");
+        let (status, _) = crate::tcp_ping::probe_tcp_with_optional_sni(
+            ip,
+            self.stop.port,
+            None,
+            network_interface,
+            Duration::from_millis(800),
+        );
+        status.is_alive()
+    }
+}
+
+fn stop_on_available_label(stop: &StopOnAvailableConfig) -> String {
+    if stop.target.contains(':') {
+        stop.target.clone()
+    } else {
+        format!("{}:{}", stop.target, stop.port)
+    }
+}
+
+fn graceful_stop_on_available(
+    state_path: &Path,
+    state: &mut ScanState,
+    stop: &StopOnAvailableConfig,
+    subnet: Option<&str>,
+) -> anyhow::Result<()> {
+    let label = stop_on_available_label(stop);
+    state.stopped_reason = Some(format!("stop_on_available:{label}"));
+    state.finished = false;
+    save_state(state_path, state)?;
+
+    match subnet {
+        Some(subnet) => {
+            println!(
+                "{}",
+                format!(
+                    "whitelist stop: {} available, discarded {}",
+                    label, subnet
+                )
+                .bright_yellow()
+            );
+        }
+        None => {
+            println!(
+                "{}",
+                format!("whitelist stop: {} available", label).bright_yellow()
+            );
+        }
+    }
+
+    Ok(())
+}
+
 async fn process_subnet(
     subnet: Ipv4Network,
     geoip: Option<&GeoIpService>,
@@ -452,6 +566,8 @@ struct ScanState {
     created_at: String,
     updated_at: String,
     finished: bool,
+    #[serde(default)]
+    stopped_reason: Option<String>,
 }
 
 fn timestamp() -> String {
@@ -535,6 +651,7 @@ fn create_state(config: &Config, scan_name: &str, job_id: String) -> ScanState {
         created_at: now.clone(),
         updated_at: now,
         finished: false,
+        stopped_reason: None,
     }
 }
 
@@ -591,8 +708,32 @@ pub async fn scan_networks(
         }
     };
 
-    if !probe_host("127.0.0.1".parse()?, 1, &config.socket_type.as_ref().unwrap(), &vec![ConfigPingType::ICMP], &[], None, None).icmp {
-        anyhow::bail!("PING («{:?}» socket type) not available", &config.socket_type.as_ref().unwrap())
+    if config.ping_type.contains(&ConfigPingType::ICMP) {
+        let socket_type = config
+            .socket_type
+            .as_ref()
+            .context("socket_type is required when ICMP is enabled")?;
+        if !probe_host(
+            "127.0.0.1".parse()?,
+            1,
+            socket_type,
+            &vec![ConfigPingType::ICMP],
+            &[],
+            None,
+            None,
+        )
+        .icmp
+        {
+            let hint = match socket_type {
+                ConfigSocketType::DGRAM => {
+                    "On Linux allow unprivileged ICMP:\n  sudo sysctl -w net.ipv4.ping_group_range=\"0 1000\"\nSee README section «Локальная сборка → Для ICMP без sudo».\nOr set socket_type = \"RAW\" with CAP_NET_RAW/sudo, or ping_type = [\"TCP\"]."
+                }
+                ConfigSocketType::RAW => {
+                    "RAW ICMP needs CAP_NET_RAW or root.\nSee README section «Локальная сборка».\nOr set ping_type = [\"TCP\"]."
+                }
+            };
+            anyhow::bail!("PING ({socket_type:?}) not available.\n{hint}");
+        }
     }
 
     let mut processed_networks: Vec<(Ipv4Network, SubnetInfo, SubnetProbeStats)> = Vec::new();
@@ -607,7 +748,7 @@ pub async fn scan_networks(
     let state_path = state_path(config, &job_id);
     let mut state = match (config.resume_enabled(), load_state(&state_path)?) {
         (true, Some(state)) if !state.finished => {
-            println!("Resuming scan state: {}", state_path.display());
+            println!("{}", format!("resume {}", state_path.display()).dimmed());
             state
         }
         _ => create_state(config, scan_name, job_id),
@@ -622,34 +763,47 @@ pub async fn scan_networks(
     } else {
         0
     };
+    let mut stop_checker = config
+        .stop_on_available
+        .as_ref()
+        .filter(|stop| stop.is_active())
+        .cloned()
+        .map(StopTargetChecker::new);
 
-    if let Some(task) = &config.task {
-        println!(
-            "CONTROL endpoint={}, task_action={:?}, task_every={} /24 (0=off)",
-            endpoint,
-            task.stop_action,
-            stop_every,
-        );
-    } else {
-        println!("CONTROL endpoint={}, task_action=off", endpoint);
+    let mut scan_meta = vec![
+        format!("{scan_name}"),
+        format!("{} /24", all_subnets.len()),
+    ];
+    if !completed_subnets.is_empty() {
+        scan_meta.push(format!("resume {}", completed_subnets.len()));
     }
-    if let Some(network_interface) = network_interface {
-        println!("NETWORK interface={} (SO_BINDTODEVICE)", network_interface);
+    if let Some(checker) = &stop_checker {
+        scan_meta.push(format!("whitelist {}", checker.label()));
     }
-    println!(
-        "SCAN {}: {} /24 subnets, state {}",
-        scan_name,
-        all_subnets.len(),
-        state_path.display()
-    );
+    if is_task {
+        scan_meta.push(format!("endpoint {endpoint}"));
+    }
+    println!("{}", scan_meta.join(" · ").cyan());
+
+    if let Some(reason) = &state.stopped_reason {
+        println!("{}", format!("last stop: {reason}").dimmed());
+    }
+
+    let mut scanned_this_run = 0usize;
 
     for (index, subnet24) in all_subnets.iter().enumerate() {
         let subnet_string = subnet24.to_string();
         let string_part = format!("{}/{}", index + 1, all_subnets.len());
 
         if completed_subnets.contains(&subnet_string) {
-            println!("{:<26} {:<7} {:<18} resume-skip", log_time(), string_part, subnet_string);
             continue;
+        }
+
+        if let Some(checker) = &mut stop_checker {
+            if checker.stop.check_before_subnet && checker.is_available(network_interface) {
+                graceful_stop_on_available(&state_path, &mut state, &checker.stop, None)?;
+                return Ok(());
+            }
         }
 
         let iteration_start = Instant::now();
@@ -666,21 +820,44 @@ pub async fn scan_networks(
         ).await {
             Ok(result) => {
                 let iteration_time = iteration_start.elapsed();
-                let info_string = if result.2.tcp_alive > 0 || result.2.icmp_alive > 0 {
+                let stats = &result.2;
+                let elapsed_sec = iteration_time.as_secs_f64();
+
+                if let Some(checker) = &mut stop_checker {
+                    if checker.stop.check_after_subnet && checker.is_available(network_interface) {
+                        graceful_stop_on_available(
+                            &state_path,
+                            &mut state,
+                            &checker.stop,
+                            Some(&subnet_string),
+                        )?;
+                        return Ok(());
+                    }
+                }
+
+                let line = if stats.tcp_alive > 0 || stats.icmp_alive > 0 {
                     format!(
-                        "icmp:{} tcp:{} ports:{}",
-                        result.2.icmp_alive,
-                        result.2.tcp_alive,
-                        tcp_port_summary(&result.2),
+                        "[{:>7}] {:<18} icmp {:>3}  tcp {:>3}  {:.1}s",
+                        string_part,
+                        subnet_string,
+                        stats.icmp_alive,
+                        stats.tcp_alive,
+                        elapsed_sec,
                     )
                 } else {
-                    "-".to_string()
+                    format!(
+                        "[{:>7}] {:<18} dead           {:.1}s",
+                        string_part, subnet_string, elapsed_sec,
+                    )
                 };
 
-                println!(
-                    "{:<26} {:<7} {:<18} {:<24}   [{}ms]",
-                    log_time(), string_part, subnet_string, info_string, iteration_time.as_millis()
-                );
+                if stats.tcp_alive > 0 {
+                    println!("{}", line.green());
+                } else if stats.icmp_alive > 0 {
+                    println!("{}", line.yellow());
+                } else {
+                    println!("{}", line.dimmed());
+                }
 
                 append_result_to_csv(&result, &state.result_csv)?;
                 append_result_to_jsonl(&result, &state.result_jsonl)?;
@@ -688,9 +865,10 @@ pub async fn scan_networks(
                 processed_networks.push(result);
                 completed_subnets.insert(subnet_string.clone());
                 failed_subnets.remove(&subnet_string);
+                scanned_this_run += 1;
             }
             Err(e) => {
-                eprintln!("  Error {}: {}", subnet_string, e);
+                eprintln!("{}", format!("  error {subnet_string}: {e}").red());
                 failed_subnets.insert(subnet_string.clone());
             }
         }
@@ -765,31 +943,19 @@ pub async fn scan_networks(
         }
     }
 
-    println!("{}", "=".repeat(100));
-    println!("{:<16} | {:<5} | {:<5} | {:<16} | {:<12} | {:<3} | {:<15} | {:<10} | {:<30}",
-             "subnet", "icmp", "tcp", "ports", "source", "", "geo", "ASN", "ISP");
-    println!("{}", "-".repeat(100));
-    for (subnet, info, stats) in processed_networks.clone() {
-        println!("{:<16} | {:<5} | {:<5} | {:<16} | {:<12} | {:<3} | {:<15} | AS{:<8} | {:<30}",
-                 subnet.to_string(),
-                 stats.icmp_alive.to_string(),
-                 stats.tcp_alive.to_string(),
-                 tcp_port_summary(&stats),
-                 info.source,
-                 info.country,
-                 info.city,
-                 info.asn.to_string(),
-                 info.as_name,
-        );
-    }
-    println!("{}", "=".repeat(300));
-
     state.finished = true;
+    state.stopped_reason = None;
     save_state(&state_path, &mut state)?;
-    println!("CSV journal saved: {}", state.result_csv);
-    println!("JSONL journal saved: {}", state.result_jsonl);
-    println!("Alive IPs saved: {}", state.result_alive_txt);
-    println!("Rejected IPs saved: {}", state.result_rejected_txt);
+    println!(
+        "{}",
+        format!(
+            "done: {} /24 this run, {} total · {}",
+            scanned_this_run,
+            completed_subnets.len(),
+            state.result_jsonl
+        )
+        .cyan()
+    );
 
     if config.logger_filetype.len() > 0 {
         let result_path = PathBuf::from(config.results_dir());

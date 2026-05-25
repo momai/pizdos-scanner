@@ -1,6 +1,7 @@
 # Что сканировать. geoip-scan берет CIDR из Xray/V2Ray geoip.dat.
 geoip_dat_path = "geoip.dat"
 geoip_codes = ["ru"]
+subnets = []
 
 # Как проверять хосты. ICMP — только информативно. TCP 443 проверяется всегда,
 # даже если ICMP ответил. Остальные порты — из tcp_ports.
@@ -8,7 +9,7 @@ geoip_codes = ["ru"]
 # В результатах такие ответы отдельно попадают в tcp_*_rejected_hosts / tcp_rejected.
 # В Docker/WSL надежнее RAW: compose уже выдает NET_RAW.
 # DGRAM можно использовать без sudo на Linux, если разрешен net.ipv4.ping_group_range.
-socket_type = "DGRAM" # DGRAM or RAW
+socket_type = "RAW" # DGRAM or RAW
 ping_type = [
     "ICMP",
     "TCP"
@@ -31,6 +32,16 @@ endpoint = "77.88.8.8"
 # Stop     - остановить скан
 # ChangeIp - дернуть [task].change_ip_url, подождать delay_seconds и проверить endpoint снова
 endpoint_failure_action = "Stop"
+
+# Остановить скан, когда указанный ресурс стал TCP-достижим.
+# Проверка идёт до и после каждой /24. Если сработало после скана,
+# результат последней подсети не пишется и не попадает в resume state.
+#[stop_on_available]
+#enabled = true
+#target = "google.com"
+#port = 443
+#check_before_subnet = true
+#check_after_subnet = true
 
 # Результаты и resume.
 results_dir = "results"
@@ -57,9 +68,6 @@ ipinfo_providers = [
     "ipapi.co",
     "GeoIP"
 ]
-
-# Только для старой команды `subnets`; `geoip-scan` берет сети из geoip.dat.
-subnets = []
 
 # Плановая пауза/ротация между подсетями.
 [task]

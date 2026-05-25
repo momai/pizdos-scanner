@@ -16,8 +16,10 @@ pub struct Config {
     pub geoip_asn_db: Option<String>,
     pub geoip_dat_path: Option<String>,
     pub geoip_codes: Option<Vec<String>>,
+    #[serde(default)]
     pub subnets: Vec<String>,
     pub operator: Option<String>,
+    #[serde(default = "default_endpoint")]
     pub endpoint: String,
     pub endpoint_failure_action: Option<ConfigEndpointFailureAction>,
     pub results_dir: Option<String>,
@@ -27,11 +29,62 @@ pub struct Config {
     pub tcp_sni_host: Option<String>,
     pub network_interface: Option<String>,
     pub socket_type: Option<ConfigSocketType>,
+    #[serde(default = "default_ping_type")]
     pub ping_type: Vec<ConfigPingType>,
+    #[serde(default)]
     pub logger_filetype: Vec<ConfigSaveResultFileType>,
+    #[serde(default = "default_ipinfo_providers")]
     pub ipinfo_providers: Vec<String>,
     pub task: Option<SubnetsScan>,
     pub db_update: Option<Vec<ConfigDBUpdate>>,
+    pub stop_on_available: Option<StopOnAvailableConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct StopOnAvailableConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default = "default_stop_on_available_port")]
+    pub port: u16,
+    #[serde(default = "default_true")]
+    pub check_before_subnet: bool,
+    #[serde(default = "default_true")]
+    pub check_after_subnet: bool,
+}
+
+fn default_stop_on_available_port() -> u16 {
+    443
+}
+
+fn default_endpoint() -> String {
+    "77.88.8.8".to_string()
+}
+
+fn default_ping_type() -> Vec<ConfigPingType> {
+    vec![ConfigPingType::ICMP, ConfigPingType::TCP]
+}
+
+fn default_ipinfo_providers() -> Vec<String> {
+    vec![
+        "ip-api.com".to_string(),
+        "ipinfo.com".to_string(),
+        "ipwho.is".to_string(),
+        "ip.sb".to_string(),
+        "ipapi.co".to_string(),
+        "GeoIP".to_string(),
+    ]
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl StopOnAvailableConfig {
+    pub fn is_active(&self) -> bool {
+        self.enabled && !self.target.trim().is_empty()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -130,7 +183,17 @@ impl Config {
 
         let mut config: Config = match toml::from_str(&contents) {
             Ok(config) => config,
-            Err(e) => anyhow::bail!("Can't parse config file {}: {}", path, e),
+            Err(e) => {
+                let message = e.to_string();
+                let hint = if message.contains("missing field `subnets`") {
+                    "\nHint: update pizdos-scanner (`./build.sh`) or add `subnets = []` to config.toml."
+                } else if message.contains("unknown variant") && contents.contains("socket_type") {
+                    "\nHint: socket_type must be `DGRAM` or `RAW` (not DRAM)."
+                } else {
+                    ""
+                };
+                anyhow::bail!("Can't parse config file {path}: {message}{hint}");
+            }
         };
 
         if !config.geoip_city_db.is_some() {
@@ -193,6 +256,12 @@ impl Config {
                 .is_some();
             if !has_change_ip_url {
                 anyhow::bail!("task.change_ip_url is required for endpoint_failure_action = ChangeIp");
+            }
+        }
+
+        if let Some(stop_on_available) = &config.stop_on_available {
+            if stop_on_available.enabled && stop_on_available.target.trim().is_empty() {
+                anyhow::bail!("stop_on_available.target is required when stop_on_available.enabled = true");
             }
         }
 

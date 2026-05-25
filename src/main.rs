@@ -8,6 +8,7 @@ mod tcp_ping;
 mod xray_geoip;
 
 use anyhow::Result;
+use colored::Colorize;
 use std::path::Path;
 use std::time::Duration;
 use clap::{
@@ -258,10 +259,14 @@ async fn main() -> Result<()> {
             }
 
             println!(
-                "Loaded {} IPv4 CIDR from {:?}; skipped IPv6: {}",
-                loaded.networks.len(),
-                loaded.matched_codes,
-                loaded.skipped_ipv6
+                "{}",
+                format!(
+                    "loaded {} IPv4 CIDR from {:?}, skipped IPv6 {}",
+                    loaded.networks.len(),
+                    loaded.matched_codes,
+                    loaded.skipped_ipv6
+                )
+                .cyan()
             );
 
             let networks = loaded.networks.iter().map(ToString::to_string).collect();
