@@ -64,8 +64,38 @@ mkdir -p "$BASE_DIR" "$DB_DIR" "$SUBNETS_DIR" "$BIN_DIR" "$BASE_DIR/results/stat
 
 TMP_BIN="$BASE_DIR/${BIN_NAME}.tmp"
 curl -fsSL "$BIN_URL" -o "$TMP_BIN"
-install -m 755 "$TMP_BIN" "$BIN_DIR/$BIN_NAME"
+install -m 755 "$TMP_BIN" "$BIN_DIR/${BIN_NAME}.bin"
 rm -f "$TMP_BIN"
+
+cat > "$BIN_DIR/$BIN_NAME" <<EOF
+#!/usr/bin/env sh
+set -eu
+
+BASE_DIR="\${PIZDOS_HOME:-$BASE_DIR}"
+REAL_BIN="$BIN_DIR/${BIN_NAME}.bin"
+
+if [ ! -x "\$REAL_BIN" ]; then
+  echo "ERROR: real binary not found: \$REAL_BIN" >&2
+  exit 1
+fi
+
+HAS_CONFIG_ARG=0
+for arg in "\$@"; do
+  case "\$arg" in
+    -c|--config)
+      HAS_CONFIG_ARG=1
+      break
+      ;;
+  esac
+done
+
+if [ "\$HAS_CONFIG_ARG" -eq 0 ] && [ -f "\$BASE_DIR/config.toml" ]; then
+  exec "\$REAL_BIN" --config "\$BASE_DIR/config.toml" "\$@"
+fi
+
+exec "\$REAL_BIN" "\$@"
+EOF
+chmod 755 "$BIN_DIR/$BIN_NAME"
 
 say "==> Downloading config + geo data"
 curl -fsSL "$CONFIG_URL" -o "$BASE_DIR/config.toml"

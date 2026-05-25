@@ -34,6 +34,7 @@ sh install.sh
 - устанавливает бинарь:
   - `root` -> `/usr/local/bin`,
   - обычный пользователь -> `~/.local/bin`,
+- ставит launcher-обёртку `pizdos-scanner`, которая по умолчанию использует `~/.pizdos-scanner/config.toml`,
 - для обычного пользователя добавляет `~/.local/bin` в `PATH` (`~/.bashrc`/`~/.zshrc`),
 - готовит рабочую директорию `~/.pizdos-scanner`.
 
