@@ -20,10 +20,13 @@ ping_type = [
     "ICMP",
     "TCP"
 ]
+# Список сканируемых портов
 tcp_ports = [443]
+
 # Параллельность по /24 подсетям. 1 = последовательный режим (по умолчанию).
 # Увеличивайте постепенно: 2, 4, 8...
 subnet_parallelism = 1
+
 # Опционально: ручной лимит одновременных host-probe (ICMP/TCP).
 # Если закомментировано — автоподбор от subnet_parallelism.
 # host_probe_parallelism = 500
@@ -47,14 +50,40 @@ tcp_timeout_ms = 2000
 # В Docker для этого включен network_mode: host в compose.yaml.
 # network_interface = "eth0"
 
-# Контрольный endpoint. После каждой /24 подсети сканер проверяет,
-# что интернет/маршрут живой. Можно указать IP или hostname.
+# Контрольный endpoint (IP или hostname).
+# После каждой /24 сканер проверяет, что сеть жива.
 endpoint = "77.88.8.8"
 
-# Что делать, если endpoint несколько раз подряд не отвечает:
-# Stop     - остановить скан
-# ChangeIp - дернуть [task].change_ip_url, подождать delay_seconds и проверить endpoint снова
+# Что делать, если endpoint не отвечает после ретраев:
+# - Stop: остановить скан
+# - ChangeIp: вызвать [task].change_ip_url, подождать [task].delay_seconds, проверить endpoint снова
+# Важно: Если где-то выбран ChangeIp, task.change_ip_url должен быть задан.
 endpoint_failure_action = "Stop"
+
+
+# Плановые действия между подсетями.
+[task]
+# После каждых N обработанных /24 выполнить stop_action.
+# 0 = не выполнять плановое действие.
+# Пример: stop_every_times=10 и stop_action="ChangeIp" -> ротация после каждых 10 /24.
+stop_every_times = 0
+
+# Действие по расписанию:
+# - Prompt: ждать Enter
+# - Delay: пауза на delay_seconds
+# - ChangeIp: вызвать change_ip_url
+stop_action = "Prompt"
+
+# URL для ротации IP (локальный API роутера/модема/VPN-скрипта).
+# Используется и для аварийного, и для планового ChangeIp:
+# - endpoint_failure_action = "ChangeIp"
+# - stop_action = "ChangeIp"
+change_ip_url = "http://127.0.0.1/changeIp"
+
+# Пауза в секундах:
+# - после endpoint_failure_action="ChangeIp"
+# - при stop_action="Delay"
+delay_seconds = 5
 
 # Остановить скан, когда указанный ресурс стал TCP-достижим.
 # Проверка идёт до и после каждой /24. Если сработало после скана,
@@ -89,26 +118,6 @@ ipinfo_providers = [
     "ipapi.co",
     "GeoIP"
 ]
-
-# Плановая пауза/ротация между подсетями.
-[task]
-# Плановое действие после каждых N обработанных /24 подсетей.
-# Нужно для паузы/ротации IP, например чтобы пытаться обходить рейтлимиты.
-# 0 = ничего не делать между подсетями.
-# Например, 10 + stop_action = "ChangeIp" сделает GET на change_ip_url после каждых 10 /24.
-stop_every_times = 0
-
-# Что делать, когда сработал stop_every_times:
-# Prompt  - ждать Enter
-# Delay   - поспать delay_seconds
-# ChangeIp - сделать GET на change_ip_url для ротации IP
-stop_action = "Prompt"
-
-# Для stop_action = "ChangeIp"
-change_ip_url = "http://127.0.0.1/changeIp"
-
-# Для stop_action = "Delay"
-delay_seconds = 5
 
 [[db_update]]
 db_type = "GeoLite2City"
