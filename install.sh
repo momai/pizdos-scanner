@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # pizdos-scanner — one-line installer (binary + geoip + config + db + hoster lists)
 #
 # Usage:
@@ -26,14 +26,7 @@ BIN_INSTALL="${BIN_INSTALL:-$HOME/.local/bin}"
 BIN_NAME="pizdos-scanner"
 PATH_MARKER="# pizdos-scanner installer"
 
-SUBNET_FILES=(
-  yandex-cloud.txt
-  vk-cloud.txt
-  regru.txt
-  timeweb.txt
-  selectel.txt
-  all-known-hosters.txt
-)
+SUBNET_FILES="yandex-cloud.txt vk-cloud.txt regru.txt timeweb.txt selectel.txt all-known-hosters.txt"
 
 info()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m!!>\033[0m %s\n' "$*"; }
@@ -44,7 +37,7 @@ need_cmd() {
 }
 
 expand_home() {
-  local p="$1"
+  p="$1"
   case "$p" in
     "~") echo "$HOME" ;;
     "~/"*) echo "${HOME}/${p#~/}" ;;
@@ -53,28 +46,29 @@ expand_home() {
 }
 
 detect_arch() {
-  local machine
   machine="$(uname -m)"
   case "$machine" in
     x86_64|amd64)  echo "x86_64" ;;
     aarch64|arm64) echo "arm64" ;;
+    armv7l|armv6l) die "обнаружен ${machine}: release-бинаря нет (нужна Raspberry Pi OS 64-bit / arm64, либо сборка из исходников)" ;;
     *) die "неподдерживаемая архитектура: $machine (нужен x86_64 или arm64)" ;;
   esac
 }
 
 download() {
-  local url="$1" dest="$2"
+  url="$1"
+  dest="$2"
   curl -fsSL --retry 3 --retry-delay 2 -o "$dest" "$url" \
     || die "не удалось скачать: $url"
 }
 
 ensure_path_in_shell() {
-  local bin_dir="$1"
-  local path_line="export PATH=\"${bin_dir}:\$PATH\" ${PATH_MARKER}"
-  local rc added=0
+  bin_dir="$1"
+  path_line="export PATH=\"${bin_dir}:\$PATH\" ${PATH_MARKER}"
+  added=0
 
   for rc in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
-    [[ -f "$rc" ]] || continue
+    [ -f "$rc" ] || continue
     if grep -Fq "${PATH_MARKER}" "$rc" 2>/dev/null; then
       continue
     fi
@@ -83,7 +77,7 @@ ensure_path_in_shell() {
     added=1
   done
 
-  if [[ "$added" -eq 0 ]]; then
+  if [ "$added" -eq 0 ]; then
     if echo ":$PATH:" | grep -q ":${bin_dir}:"; then
       info "PATH уже содержит ${bin_dir}"
     else
@@ -96,10 +90,12 @@ ensure_path_in_shell() {
 }
 
 write_wrapper() {
-  local bin_dir="$1" work_dir="$2" wrapper="${bin_dir}/${BIN_NAME}"
+  bin_dir="$1"
+  work_dir="$2"
+  wrapper="${bin_dir}/${BIN_NAME}"
 
   cat > "$wrapper" <<EOF
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # ${PATH_MARKER}
 PIZDOS_DIR="${work_dir}"
 cd "\$PIZDOS_DIR" || {
@@ -117,7 +113,6 @@ main() {
   need_cmd chmod
   need_cmd mkdir
 
-  local arch asset tmp bin_dir work_dir
   arch="$(detect_arch)"
   asset="${BIN_NAME}-linux-${arch}"
   work_dir="$(expand_home "$PIZDOS_DIR")"
@@ -134,12 +129,12 @@ main() {
   chmod +x "${tmp}"
   mv -f "${tmp}" "${work_dir}/${BIN_NAME}.bin"
 
-  if [[ -n "${BIN_INSTALL}" ]]; then
+  if [ -n "${BIN_INSTALL}" ]; then
     mkdir -p "${bin_dir}"
     write_wrapper "${bin_dir}" "${work_dir}"
     info "команда в PATH: ${bin_dir}/${BIN_NAME}"
 
-    if [[ "${SKIP_PATH:-0}" != "1" ]]; then
+    if [ "${SKIP_PATH:-0}" != "1" ]; then
       ensure_path_in_shell "${bin_dir}"
     else
       export PATH="${bin_dir}:$PATH"
@@ -153,7 +148,7 @@ main() {
   info "скачиваю config.toml"
   download "${RAW}/config.toml" "${work_dir}/config.toml"
 
-  if [[ "${SKIP_MMDB:-0}" != "1" ]]; then
+  if [ "${SKIP_MMDB:-0}" != "1" ]; then
     info "скачиваю GeoLite2 mmdb (ASN/City)"
     download "${MMDB_CITY}" "${work_dir}/db/GeoLite2-City.mmdb"
     download "${MMDB_ASN}" "${work_dir}/db/GeoLite2-ASN.mmdb"
@@ -161,10 +156,9 @@ main() {
     warn "SKIP_MMDB=1 — mmdb пропущены"
   fi
 
-  if [[ "${SKIP_SUBNETS:-0}" != "1" ]]; then
+  if [ "${SKIP_SUBNETS:-0}" != "1" ]; then
     info "скачиваю списки subnets/ (хостеры)"
-    local f
-    for f in "${SUBNET_FILES[@]}"; do
+    for f in ${SUBNET_FILES}; do
       download "${RAW}/subnets/${f}" "${work_dir}/subnets/${f}"
     done
   else
@@ -181,13 +175,13 @@ main() {
   echo "  данные: ${work_dir}"
   echo
 
-  if [[ "${SKIP_PATH:-0}" != "1" ]] && [[ -n "${BIN_INSTALL}" ]]; then
+  if [ "${SKIP_PATH:-0}" != "1" ] && [ -n "${BIN_INSTALL}" ]; then
     warn "если команда не найдена в этом же окне терминала:"
     echo "  source ~/.bashrc   # или откройте новый терминал"
     echo
   fi
 
-  if [[ "$(id -u)" -ne 0 ]]; then
+  if [ "$(id -u)" -ne 0 ]; then
     warn "для ICMP без sudo (Linux):"
     echo '  sudo sysctl -w net.ipv4.ping_group_range="0 1000"'
     echo "  в ${work_dir}/config.toml: socket_type = \"DGRAM\""
