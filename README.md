@@ -173,12 +173,6 @@ pizdos-scanner geoip-scan ru
 sudo sysctl -w net.ipv4.ping_group_range="0 1000"
 ```
 
-```toml
-socket_type = "DGRAM"
-```
-
-В Docker используется `network_mode: host`, capability `NET_RAW` и RAW-сокеты.
-
 
 ## Конфигурация (`config.toml`)
 
