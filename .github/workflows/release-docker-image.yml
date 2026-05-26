@@ -17,47 +17,8 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  build-and-push:
-    name: Build and push Docker image
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
-            type=sha,prefix=sha-
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   build-binary:
-    name: Build release binaries
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Build binaries
     strategy:
       fail-fast: false
       matrix:
@@ -147,6 +108,58 @@ jobs:
         with:
           name: release-binary-${{ matrix.asset_name }}
           path: dist/*
+
+  build-and-push:
+    name: Build and push Docker image
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-binary]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary-pizdos-scanner-linux-x86_64
+          path: dist
+
+      - name: Prepare Docker binary input
+        run: |
+          cp dist/pizdos-scanner-linux-x86_64 ./pizdos-scanner
+          chmod +x ./pizdos-scanner
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.release
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   publish-release:
     name: Publish GitHub Release
