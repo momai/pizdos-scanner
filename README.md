@@ -129,16 +129,6 @@ pizdos-scanner subnets subnets/timeweb.txt
 pizdos-scanner subnets subnets/selectel.txt
 pizdos-scanner subnets subnets/all-known-hosters.txt   # все хостеры разом
 ```
-Тоже, для Docker:
-```bash
-docker compose run --rm pizdos-scanner subnets subnets/yandex-cloud.txt
-```
-
-Обновить списки из RIPEstat:
-
-```bash
-python3 scripts/update-hoster-subnets.py
-```
 
 ## Сборка из исходников (Ubuntu/Debian)
 
