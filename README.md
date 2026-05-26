@@ -307,16 +307,3 @@ check_after_subnet = true
 ```
 
 Если stop сработал после скана подсети, результат этой подсети не пишется и не попадает в resume.
-
-### MaxMind GeoIP (опционально)
-
-`GeoLite2` `.mmdb` нужны только для колонок `city`, `asn`, `as_name`.
-Без них скан работает, но эти поля будут `N/A`.
-
-```bash
-curl -L -o db/GeoLite2-City.mmdb \
-  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb
-
-curl -L -o db/GeoLite2-ASN.mmdb \
-  https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb
-```
