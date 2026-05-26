@@ -27,7 +27,7 @@ export PATH="/usr/local/bin:$PATH"
 Запустите сканер:
 
 ```bash
-./pizdos-scanner geoip-scan ru # сканирование всего ru на основе geoip.dat
+pizdos-scanner geoip-scan ru # сканирование всего ru на основе geoip.dat
 ```
 
 ## Ручная установка
@@ -96,32 +96,29 @@ docker compose run --rm pizdos-scanner geoip-scan ru
 
 - Для установленного приложения:
 ```bash
-./pizdos-scanner help                              # список всех команд
-./pizdos-scanner geoip-list                         # показать группы из geoip.dat
-./pizdos-scanner geoip-scan ru                      # скан одной группы
-./pizdos-scanner geoip-scan cn private telegram     # скан нескольких групп
-./pizdos-scanner subnets                            # скан CIDR из config.toml
-./pizdos-scanner subnets subnets.txt                # скан CIDR из файла
-./pizdos-scanner icmp-fast geoip-scan ru            # быстрый ICMP-only по geoip.dat code
-./pizdos-scanner icmp-fast subnets subnets.txt      # быстрый ICMP-only из файла CIDR
-./pizdos-scanner tcp-scan-file results/<scan>_icmp_alive.txt 443  # TCP-проверка списка IP
-./pizdos-scanner subnet 1.1.1.1                     # скан одной /24 по любому IP внутри неё
-./pizdos-scanner finalize results/<scan>.jsonl      # пересобрать *_alive.txt и *_rejected.txt
-./pizdos-scanner test 1.1.1.1 80 443                # TCP-проверка IP/портов
-./pizdos-scanner test 1.1.1.1 443 --sni example.com # TCP/TLS-проверка с SNI
+pizdos-scanner help                              # список всех команд
+pizdos-scanner geoip-list                         # показать группы из geoip.dat
+pizdos-scanner geoip-scan ru                      # скан одной группы
+pizdos-scanner geoip-scan cn private telegram     # скан нескольких групп
+pizdos-scanner subnets                            # скан CIDR из config.toml
+pizdos-scanner subnets subnets.txt                # скан CIDR из файла
+pizdos-scanner icmp-fast geoip-scan ru            # быстрый ICMP-only по geoip.dat code
+pizdos-scanner icmp-fast subnets subnets.txt      # быстрый ICMP-only из файла CIDR
+pizdos-scanner tcp-scan-file results/<scan>_icmp_alive.txt 443  # TCP-проверка списка IP
+pizdos-scanner subnet 1.1.1.1                     # скан одной /24 по любому IP внутри неё
+pizdos-scanner finalize results/<scan>.jsonl      # пересобрать *_alive.txt и *_rejected.txt
+pizdos-scanner test 1.1.1.1 80 443                # TCP-проверка IP/портов
+pizdos-scanner test 1.1.1.1 443 --sni example.com # TCP/TLS-проверка с SNI
 ```
 
 Если бинарь установлен в `PATH`, просто используйте `pizdos-scanner ...`.
 
 - Для Docker:
 ```bash
-docker compose run --rm --no-build pizdos-scanner help
-docker compose run --rm --no-build pizdos-scanner geoip-scan ru
+docker compose run --rm pizdos-scanner help
+docker compose run --rm pizdos-scanner geoip-scan ru
 ...
 ```
-
-- Команды делают то же самое, что и в разделе для бинаря, но выполняются внутри контейнера.
-- `--no-build` ускоряет запуск, если образ уже собран/скачан.
 
 Если остались старые контейнеры:
 ```bash
@@ -135,16 +132,16 @@ docker compose down --remove-orphans
 Перекрывающиеся CIDR (например `/22` и вложенный `/23`) схлопываются при генерации.
 
 ```bash
-./pizdos-scanner subnets subnets/yandex-cloud.txt
-./pizdos-scanner subnets subnets/vk-cloud.txt
-./pizdos-scanner subnets subnets/regru.txt
-./pizdos-scanner subnets subnets/timeweb.txt
-./pizdos-scanner subnets subnets/selectel.txt
-./pizdos-scanner subnets subnets/all-known-hosters.txt   # все хостеры разом
+pizdos-scanner subnets subnets/yandex-cloud.txt
+pizdos-scanner subnets subnets/vk-cloud.txt
+pizdos-scanner subnets subnets/regru.txt
+pizdos-scanner subnets subnets/timeweb.txt
+pizdos-scanner subnets subnets/selectel.txt
+pizdos-scanner subnets subnets/all-known-hosters.txt   # все хостеры разом
 ```
 Тоже, для Docker:
 ```bash
-docker compose run --rm --no-build pizdos-scanner subnets subnets/yandex-cloud.txt
+docker compose run --rm pizdos-scanner subnets subnets/yandex-cloud.txt
 ```
 
 Обновить списки из RIPEstat:
