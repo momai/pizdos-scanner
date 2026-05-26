@@ -103,7 +103,8 @@ jobs:
               /dist/pizdos-scanner-linux-armv7 --config /dist/ci-config.toml geoip-list
             '
 
-      - name: Upload release artifacts
+      - name: Upload release artifacts (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: release-binary-${{ matrix.asset_name }}
