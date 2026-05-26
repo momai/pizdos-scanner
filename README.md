@@ -9,25 +9,28 @@ ICMP используется как дополнительный сигнал, 
 
 Интерактивный режим (`console = "tui"` в `config.toml`): прогресс, последние `/24`, endpoint/whitelist, события и resume в одном экране.
 
-## Быстрый старт
+## Быстрый старт One-liner автоустановка 
 
-### One-liner автоустановка (x86_64/arm64/armv7, включая Raspberry Pi 32-bit и 64-bit):
+- x86_64/arm64/armv7, включая Raspberry Pi 32-bit и 64-bit
+- Рабочая директория `~/.pizdos-scanner`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/momai/pizdos-scanner/master/install.sh | sh
 ```
-- Рабочая директория `~/.pizdos-scanner`.
 
 После установки:
 
 ```bash
 hash -r
 export PATH="/usr/local/bin:$PATH"
+```
+Запустите сканер:
 
-pizdos-scanner geoip-scan ru
+```bash
+./pizdos-scanner geoip-scan ru # сканирование всего ru на основе geoip.dat
 ```
 
-### Ручная установка
+## Ручная установка
 Скачайте собранный бинарный файл
 ```bash
 # x86_64
